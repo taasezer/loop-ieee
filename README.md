@@ -1,343 +1,302 @@
-# LOOP Logistics - Backend API
+# LOOP Lojistik Platformu 🚚
 
-A comprehensive logistics platform backend built with Python FastAPI, featuring AI-powered courier assignment, real-time tracking, and seamless Flutter integration.
+Modern, ölçeklenebilir ve AI destekli lojistik yönetim platformu. GPS takibi, rota optimizasyonu, kurye yönetimi ve gerçek zamanlı analizler sunar.
 
-## Features
+## Özellikler ✨
 
-- **Maps & GPS Integration** - Google Maps API for geocoding, routing, and distance calculations
-- **Real-Time Location Tracking** - WebSocket-based live courier tracking
-- **Weather Integration** - OpenWeatherMap API for weather-aware logistics
-- **Live Currency Exchange** - Real-time currency conversion for international operations
-- **AI Decision Engine** - Intelligent courier assignment based on multiple factors
-- **n8n Automation** - Ready-to-use workflow templates for automation
-- **Flutter-Ready** - Complete Flutter integration guide and examples
-- **Supabase Database** - Scalable PostgreSQL database with RLS security
+- 🗺️ **GPS Takibi** - Gerçek zamanlı kurye konum takibi
+- 🧠 **AI Karar Motoru** - Akıllı kurye ataması ve rota optimizasyonu
+- 🌤️ **Hava Durumu Entegrasyonu** - Teslimatları hava durumuna göre optimize etme
+- 💱 **Çoklu Para Birimi** - Uluslararası gönderiler için otomatik döviz çevirimi
+- 📱 **Flutter Uyumlu** - Mobil uygulama ile tam entegrasyon
+- 🔒 **Güvenlik** - JWT authentication ve rate limiting
+- 📊 **Analitik** - Detaylı raporlama ve performans metrikleri
 
-## Tech Stack
+## Teknoloji Stack'i 🛠️
 
-- **Framework:** FastAPI (Python 3.9+)
-- **Database:** Supabase (PostgreSQL)
-- **APIs:** Google Maps, OpenWeatherMap, ExchangeRate-API
-- **Real-Time:** WebSockets
-- **AI/ML:** NumPy, Scikit-learn
-- **Automation:** n8n workflows
+### Backend
+- **FastAPI** - Modern Python web framework
+- **PostgreSQL + PostGIS** - Coğrafi veri yönetimi
+- **Redis** - Önbellekleme ve session yönetimi
+- **SQLAlchemy** - ORM ve veritabanı yönetimi
+- **Pydantic** - Veri doğrulama ve serileştirme
 
-## Project Structure
+### API Entegrasyonları
+- **Mapbox API** - Harita, rota planlama ve GPS takibi
+- **OpenWeatherMap API** - Hava durumu verisi
+- **CurrencyAPI** - Gerçek zamanlı döviz kurları
+- **n8n** - AI karar motoru ve otomasyon
 
-```
-loop-logistics/
-├── app/
-│   ├── main.py                 # FastAPI application
-│   ├── config.py               # Configuration settings
-│   ├── database.py             # Supabase client
-│   ├── models/
-│   │   └── schemas.py          # Pydantic models
-│   ├── routes/
-│   │   ├── maps.py             # Maps & GPS endpoints
-│   │   ├── weather.py          # Weather endpoints
-│   │   ├── currency.py         # Currency endpoints
-│   │   ├── tracking.py         # Location tracking endpoints
-│   │   ├── orders.py           # Order management endpoints
-│   │   ├── couriers.py         # Courier management endpoints
-│   │   └── ai_engine.py        # AI decision engine endpoints
-│   └── services/
-│       ├── maps_service.py     # Google Maps integration
-│       ├── weather_service.py  # Weather API integration
-│       ├── currency_service.py # Currency API integration
-│       ├── tracking_service.py # Location tracking logic
-│       └── ai_engine.py        # AI assignment algorithm
-├── n8n/
-│   ├── README.md               # n8n integration guide
-│   └── workflows/              # Pre-built workflow templates
-├── docs/
-│   ├── API_REFERENCE.md        # Complete API documentation
-│   └── FLUTTER_INTEGRATION.md  # Flutter integration guide
-├── requirements.txt            # Python dependencies
-├── .env.example               # Environment variables template
-└── run.py                     # Application entry point
-```
+### Altyapı
+- **Docker & Docker Compose** - Konteynerizasyon
+- **Nginx** - Reverse proxy ve load balancer
+- **Prometheus + Grafana** - Monitoring ve metrik toplama
 
-## Quick Start
+## Hızlı Başlangıç 🚀
 
-### 1. Prerequisites
+### Gereksinimler
+- Docker ve Docker Compose
+- Python 3.11+ (geliştirme için)
+- Mapbox API anahtarı
 
-- Python 3.9+
-- Supabase account
-- Google Maps API key
-- OpenWeatherMap API key
-- ExchangeRate-API key
+### Kurulum
 
-### 2. Installation
-
+1. **Projeyi klonlayın**
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/your-org/loop-logistics.git
 cd loop-logistics
+```
 
-# Create virtual environment
+2. **Çevre değişkenlerini ayarlayın**
+```bash
+cp .env.example .env
+# .env dosyasını düzenleyin - API anahtarlarını girin
+```
+
+3. **Docker ile başlatın**
+```bash
+docker-compose up -d
+```
+
+4. **API'yi test edin**
+```bash
+curl http://localhost:8000/api-info
+```
+
+### Geliştirme Ortamı
+
+1. **Sanal ortam oluşturun**
+```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
+```
 
-# Install dependencies
+2. **Bağımlılıkları yükleyin**
+```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configuration
-
-Create `.env` file from template:
-
+3. **Veritabanını başlatın**
 ```bash
-cp .env.example .env
+alembic upgrade head
 ```
 
-Edit `.env` and add your API keys:
-
-```env
-# Supabase (already configured)
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_KEY=your_supabase_service_role_key
-
-# Google Maps API
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-
-# Weather API
-OPENWEATHER_API_KEY=your_openweather_api_key
-
-# Currency API
-EXCHANGE_RATE_API_KEY=your_exchangerate_api_key
-```
-
-### 4. Database Setup
-
-The database schema is already created in Supabase with the following tables:
-- `couriers` - Courier information
-- `courier_locations` - Real-time location data
-- `orders` - Delivery orders
-- `assignment_history` - AI assignment tracking
-- `location_history` - Historical location data
-
-### 5. Run the Application
-
+4. **Uygulamayı başlatın**
 ```bash
-python run.py
+uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`
+## API Dokümantasyonu 📚
 
-Access API documentation at `http://localhost:8000/docs`
+### Ana Endpoint'ler
 
-## API Endpoints
+- `GET /` - API durumu
+- `GET /health` - Sağlık kontrolü
+- `GET /docs` - Swagger UI dokümantasyonu
+- `GET /redoc` - ReDoc dokümantasyonu
 
-### Health Check
-```
-GET /health
-```
+### Kurye Yönetimi
+- `GET /api/v1/couriers` - Tüm kuryeler
+- `GET /api/v1/couriers/nearby` - Yakındaki kuryeler
+- `POST /api/v1/couriers` - Yeni kurye oluştur
+- `PATCH /api/v1/couriers/{id}/location` - Konum güncelle
 
-### Maps & GPS
-```
-POST /api/maps/geocode           # Convert address to coordinates
-POST /api/maps/reverse-geocode   # Convert coordinates to address
-POST /api/maps/distance          # Calculate distance
-POST /api/maps/route             # Get optimized route
-```
+### Sipariş Yönetimi
+- `GET /api/v1/orders` - Tüm siparişler
+- `POST /api/v1/orders` - Yeni sipariş oluştur
+- `POST /api/v1/orders/{id}/assign` - Kurye ata
+- `POST /api/v1/orders/{id}/complete` - Teslimat tamamla
 
-### Weather
-```
-POST /api/weather/current        # Current weather
-POST /api/weather/forecast       # Weather forecast
-POST /api/weather/impact         # Weather impact score
-```
+### GPS Takibi
+- `GET /api/v1/tracking/{courier_id}` - Kurye konumu
+- `POST /api/v1/tracking/update` - Konum güncelle
 
-### Currency
-```
-POST /api/currency/rates         # Exchange rates
-POST /api/currency/convert       # Convert currency
-GET  /api/currency/popular       # Popular currencies
-```
+## Flutter Entegrasyonu 📱
 
-### Tracking
-```
-POST /api/tracking/update        # Update courier location
-GET  /api/tracking/courier/{id}  # Get courier location
-GET  /api/tracking/active        # All active couriers
-GET  /api/tracking/order/{id}    # Track order
-POST /api/tracking/nearby        # Find nearby couriers
-WS   /api/tracking/ws            # WebSocket for real-time
-```
-
-### Orders
-```
-POST   /api/orders/              # Create order
-GET    /api/orders/              # List orders
-GET    /api/orders/{id}          # Get order
-PATCH  /api/orders/{id}          # Update order
-DELETE /api/orders/{id}          # Cancel order
-GET    /api/orders/{id}/route    # Get order route
+### API Client Örneği
+```dart
+class LoopApiClient {
+  final Dio _dio = Dio();
+  
+  Future<List<Courier>> getNearbyCouriers(LatLng location) async {
+    final response = await _dio.get('/api/v1/couriers/nearby', 
+      queryParameters: {
+        'lat': location.latitude,
+        'lng': location.longitude,
+        'radius': 5000
+      }
+    );
+    
+    return (response.data as List)
+      .map((json) => Courier.fromJson(json))
+      .toList();
+  }
+}
 ```
 
-### Couriers
-```
-POST  /api/couriers/             # Create courier
-GET   /api/couriers/             # List couriers
-GET   /api/couriers/{id}         # Get courier
-PATCH /api/couriers/{id}         # Update courier
-GET   /api/couriers/{id}/stats   # Courier statistics
-```
+### WebSocket Bağlantısı
+```dart
+// Gerçek zamanlı GPS takibi için
+final channel = WebSocketChannel.connect(
+  Uri.parse('wss://api.loop.com/ws/tracking'),
+);
 
-### AI Engine
-```
-POST /api/ai/recommend           # Get courier recommendation
-POST /api/ai/assign              # Auto-assign courier
-POST /api/ai/optimize-route      # Optimize delivery route
-GET  /api/ai/analytics/assignments # Assignment analytics
+channel.stream.listen((message) {
+  final data = jsonDecode(message);
+  updateCourierLocation(data['courier_id'], data['location']);
+});
 ```
 
-## AI Decision Engine
+## AI Karar Motoru 🤖
 
-The AI engine uses a weighted scoring system to find the best courier for each order:
+n8n ile entegre AI karar motoru:
 
-**Scoring Factors:**
-- Distance (35%) - Proximity to pickup location
-- Courier Rating (20%) - Historical performance
-- Weather (15%) - Current weather conditions
-- Traffic (15%) - Real-time traffic conditions
-- Workload (10%) - Current active deliveries
-- Vehicle Match (5%) - Vehicle-package compatibility
+### Özellikler
+- **Kurye Ataması** - En uygun kuryeyi otomatik seç
+- **Rota Optimizasyonu** - En kısa ve ekonomik rotayı bul
+- **Gecikme Tahmini** - Hava durumu ve trafik analizi
+- **Performans Analizi** - Kurye verimliliğini ölç
 
-**Example Score Calculation:**
+### Örnek Workflow
+```json
+{
+  "name": "Courier Assignment AI",
+  "nodes": [
+    {
+      "type": "webhook",
+      "name": "Order Trigger",
+      "parameters": {
+        "path": "order-assignment"
+      }
+    },
+    {
+      "type": "function",
+      "name": "ML Prediction", 
+      "parameters": {
+        "model": "courier-assignment-v2"
+      }
+    }
+  ]
+}
+```
+
+## Monitoring ve Logging 📊
+
+### Prometheus Metrikleri
+- API response times
+- Database query performance
+- Courier activity metrics
+- Order completion rates
+
+### Grafana Dashboard'ları
+- Sistem sağlığı
+- Kurye performansı
+- Sipariş istatistikleri
+- Kullanıcı aktivitesi
+
+### Log Yapılandırması
 ```python
-total_score = (
-    distance_score * 0.35 +
-    rating_score * 0.20 +
-    weather_score * 0.15 +
-    traffic_score * 0.15 +
-    workload_score * 0.10 +
-    vehicle_score * 0.05
-)
+# Loguru ile yapılandırma
+logger.add("logs/loop_{time}.log", 
+          rotation="500 MB", 
+          retention="10 days",
+          level="INFO")
 ```
 
-## n8n Integration
+## Güvenlik 🔒
 
-Pre-built workflows for automation:
-
-1. **Auto-Assignment** - Automatically assign couriers when orders are created
-2. **Weather Alerts** - Monitor weather and alert couriers
-3. **Performance Analytics** - Generate daily performance reports
-4. **Route Optimization** - Optimize routes for couriers with multiple deliveries
-
-See `/n8n/README.md` for setup instructions.
-
-## Flutter Integration
-
-Complete Flutter integration guide with:
-- API service implementations
-- Location tracking
-- WebSocket integration
-- Order management
-- Real-time tracking UI
-
-See `/docs/FLUTTER_INTEGRATION.md` for details.
-
-## API Keys Setup
-
-### Google Maps API
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a project
-3. Enable Maps JavaScript API, Geocoding API, Directions API
-4. Create credentials and get API key
-
-### OpenWeatherMap API
-1. Sign up at [OpenWeatherMap](https://openweathermap.org/api)
-2. Get free API key (60 calls/minute)
-
-### ExchangeRate API
-1. Sign up at [ExchangeRate-API](https://www.exchangerate-api.com/)
-2. Get free API key (1,500 requests/month)
-
-## Development
-
-### Run in Development Mode
-```bash
-python run.py
+### JWT Authentication
+```python
+# Token yapısı
+{
+  "sub": "user_id",
+  "exp": 1234567890,
+  "iat": 1234567890,
+  "scope": "courier|admin|customer"
+}
 ```
 
-### Run Tests
-```bash
-pytest
-```
+### Rate Limiting
+- API başına: 1000 request/saat
+- IP başına: 100 request/dakika
+- Auth endpoint'leri: 10 request/dakika
 
-### Code Formatting
-```bash
-black app/
-```
+### Güvenlik Başlıkları
+- HTTPS zorunlu
+- CORS koruması
+- Input validation
+- SQL injection koruma
 
-## Production Deployment
+## Ölçeklenebilirlik 🚀
 
-### Using Docker
-```dockerfile
-FROM python:3.9-slim
+### Horizontal Scaling
+- Load balancer (Nginx)
+- Multiple API instances
+- Database read replicas
+- Redis cluster
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+### Performance Hedefleri
+- API response time: < 200ms
+- Database query time: < 50ms
+- Concurrent users: 10,000+
+- Uptime: 99.9%
 
-COPY . .
+## Geliştirme Planı 📋
 
-CMD ["python", "run.py"]
-```
+### Faz 1: Core Backend (2-3 hafta)
+- [x] FastAPI altyapısı
+- [x] Temel veritabanı modelleri
+- [x] Authentication sistemi
+- [ ] Temel CRUD operasyonları
 
-### Environment Variables
-Set all required environment variables in production.
+### Faz 2: GPS ve Harita Entegrasyonu (2 hafta)
+- [ ] Mapbox API entegrasyonu
+- [ ] GPS tracking sistemi
+- [ ] Rota optimizasyonu
+- [ ] Spatial sorgular
 
-### Security Considerations
-- Use HTTPS in production
-- Implement API authentication (JWT)
-- Enable rate limiting
-- Secure API keys
-- Regular security audits
+### Faz 3: API Entegrasyonları (1-2 hafta)
+- [ ] Hava durumu API
+- [ ] Döviz kuru API
+- [ ] External servis entegrasyonları
 
-## Performance
+### Faz 4: AI ve Otomasyon (2-3 hafta)
+- [ ] n8n kurulumu
+- [ ] AI karar motorları
+- [ ] Otomatik kurye atama
+- [ ] Predictive analytics
 
-- **Concurrent Requests:** Handles 1000+ concurrent WebSocket connections
-- **Response Time:** Average < 100ms for API calls
-- **Database Queries:** Optimized with indexes
-- **Caching:** Currency rates cached for 30 minutes
+### Faz 5: Testing ve Optimization (1-2 hafta)
+- [ ] Unit testler
+- [ ] Integration testler
+- [ ] Performance testleri
+- [ ] Güvenlik testleri
 
-## Monitoring
+## Katkıda Bulunma 🤝
 
-Recommended monitoring tools:
-- API metrics: Prometheus + Grafana
-- Error tracking: Sentry
-- Logging: ELK Stack
-- Uptime monitoring: UptimeRobot
+1. Fork yapın
+2. Feature branch oluşturun (`git checkout -b feature/AmazingFeature`)
+3. Commit yapın (`git commit -m 'Add some AmazingFeature'`)
+4. Branch'e push yapın (`git push origin feature/AmazingFeature`)
+5. Pull Request oluşturun
 
-## Contributing
+## Lisans 📄
 
-1. Fork the repository
-2. Create feature branch
-3. Commit changes
-4. Push to branch
-5. Create Pull Request
+Bu proje MIT Lisansı ile lisanslanmıştır. Detaylar için `LICENSE` dosyasına bakın.
 
-## License
+## İletişim 📧
 
-MIT License
+LOOP Development Team - dev@loop.com
 
-## Support
+Project Link: [https://github.com/your-org/loop-logistics](https://github.com/your-org/loop-logistics)
 
-For issues or questions:
-- API Documentation: `/docs`
-- Flutter Guide: `/docs/FLUTTER_INTEGRATION.md`
-- n8n Guide: `/n8n/README.md`
+## Teşekkürler 🙏
 
-## Authors
-
-Built for LOOP Logistics Platform
+- [FastAPI](https://fastapi.tiangolo.com/) - Harika web framework'ü için
+- [Mapbox](https://www.mapbox.com/) - Harita ve rota planlama servisleri için
+- [n8n](https://n8n.io/) - Açık kaynak otomasyon platformu için
+- Tüm katkıda bulunanlar ve destekçiler için
 
 ---
 
-**Note:** This is a backend API. For the complete system, integrate with:
-- Flutter mobile app (courier & customer apps)
-- Admin dashboard (web)
-- n8n automation workflows
+**LOOP Lojistik Platformu** - Modern lojistik çözümleri için kapsamlı backend sistemi. 🚚✨
