@@ -1,0 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.nav-link {
+  @apply text-gray-600 hover:text-blue-600 font-medium transition-colors px-3 py-2 rounded-lg hover:bg-blue-50;
+}
+
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-100 p-6 hover:shadow-md transition-all duration-300;
+}
+
+.btn-primary {
+  @apply px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-medium hover:from-blue-700 hover:to-indigo-700 transition-all duration-300 shadow-lg hover:shadow-xl;
+}
+
+.btn-secondary {
+  @apply px-6 py-3 bg-white text-gray-700 rounded-lg font-medium border border-gray-200 hover:bg-gray-50 transition-all duration-300;
+}
+
+.status-badge {
+  @apply px-3 py-1 rounded-full text-xs font-semibold inline-block;
+}
+
+.status-created { @apply bg-blue-100 text-blue-700; }
+.status-assigned { @apply bg-purple-100 text-purple-700; }
+.status-picked { @apply bg-yellow-100 text-yellow-700; }
+.status-in_transit { @apply bg-orange-100 text-orange-700; }
+.status-delivered { @apply bg-green-100 text-green-700; }
+.status-cancelled { @apply bg-red-100 text-red-700; }
+.status-online { @apply bg-green-100 text-green-700; }
+.status-offline { @apply bg-gray-100 text-gray-700; }
+.status-busy { @apply bg-red-100 text-red-700; }
