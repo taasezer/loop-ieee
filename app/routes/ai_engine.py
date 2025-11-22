@@ -1,86 +1,53 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import get_db
+from app.models.orm import Order
+from app.services.ai_dispatcher import find_best_courier, assign_order_to_courier
 from pydantic import BaseModel
-from app.services.ai_engine import ai_engine
 
 router = APIRouter()
 
 class AssignmentRequest(BaseModel):
-    order_id: str
-
-class OptimizeRouteRequest(BaseModel):
-    courier_id: str
+    order_id: int
 
 @router.post("/recommend")
-async def recommend_courier(request: AssignmentRequest):
-    """Get AI recommendation for best courier"""
-    result = await ai_engine.find_best_courier(request.order_id)
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Could not find suitable courier")
-
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
+async def recommend_courier(
+    request: AssignmentRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    order = await db.get(Order, request.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    best_courier = await find_best_courier(db, order)
+    
+    if not best_courier:
+        return {"message": "No suitable courier found"}
+        
+    return {
+        "recommended_courier_id": best_courier.id,
+        "vehicle_type": best_courier.vehicle_type,
+        "rating": best_courier.rating
+    }
 
 @router.post("/assign")
-async def auto_assign(request: AssignmentRequest):
-    """Automatically assign best courier to order"""
-    result = await ai_engine.auto_assign_courier(request.order_id)
-
-    if not result:
-        raise HTTPException(status_code=400, detail="Assignment failed")
-
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Assignment failed"))
-
-    return result
-
-@router.post("/optimize-route")
-async def optimize_courier_route(request: OptimizeRouteRequest):
-    """Optimize delivery route for courier with multiple orders"""
-    result = await ai_engine.optimize_route_for_courier(request.courier_id)
-
-    if not result:
-        raise HTTPException(status_code=404, detail="Could not optimize route")
-
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return result
-
-@router.get("/analytics/assignments")
-async def get_assignment_analytics():
-    """Get analytics on AI assignment performance"""
-    from app.database import supabase_admin
-
-    try:
-        assignments = supabase_admin.table("assignment_history") \
-            .select("*") \
-            .order("created_at", desc=True) \
-            .limit(100) \
-            .execute()
-
-        if not assignments.data:
-            return {
-                "total_assignments": 0,
-                "average_score": 0,
-                "ai_assignments": 0,
-                "manual_assignments": 0
-            }
-
-        scores = [a["assignment_score"] for a in assignments.data if a.get("assignment_score")]
-        ai_count = len([a for a in assignments.data if a.get("assigned_by") == "ai"])
-        manual_count = len([a for a in assignments.data if a.get("assigned_by") == "manual"])
-
-        return {
-            "total_assignments": len(assignments.data),
-            "average_score": sum(scores) / len(scores) if scores else 0,
-            "ai_assignments": ai_count,
-            "manual_assignments": manual_count,
-            "average_distance": sum(a.get("distance_to_pickup", 0) for a in assignments.data) / len(assignments.data),
-            "average_time": sum(a.get("estimated_time", 0) for a in assignments.data) / len(assignments.data)
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch analytics: {str(e)}")
+async def auto_assign(
+    request: AssignmentRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    order = await db.get(Order, request.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    best_courier = await find_best_courier(db, order)
+    
+    if not best_courier:
+        raise HTTPException(status_code=400, detail="No courier available for assignment")
+        
+    updated_order = await assign_order_to_courier(db, order.id, best_courier.id)
+    
+    return {
+        "status": "assigned",
+        "order_id": updated_order.id,
+        "courier_id": best_courier.id
+    }

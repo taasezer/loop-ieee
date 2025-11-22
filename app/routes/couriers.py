@@ -1,156 +1,130 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy import and_
+from typing import List
+from app.database import get_db
+from app.models.orm import Courier, User, UserRole, Order, OrderStatus
+from app.dependencies import get_current_user
 from pydantic import BaseModel
-from typing import Optional
-from app.database import supabase_admin
-from datetime import datetime
 
 router = APIRouter()
 
-class CourierCreate(BaseModel):
-    name: str
-    phone: str
-    email: str
+class CourierResponse(BaseModel):
+    id: int
     vehicle_type: str
-    license_plate: Optional[str] = None
+    is_online: bool
+    rating: float
+    created_at: str
+    
+    class Config:
+        from_attributes = True
 
-class CourierUpdate(BaseModel):
-    name: Optional[str] = None
-    phone: Optional[str] = None
-    email: Optional[str] = None
-    status: Optional[str] = None
-    vehicle_type: Optional[str] = None
-    license_plate: Optional[str] = None
+@router.get("/", response_model=List[CourierResponse])
+async def get_couriers(
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Courier))
+    couriers = result.scalars().all()
+    
+    return [
+        CourierResponse(
+            id=c.id,
+            vehicle_type=c.vehicle_type,
+            is_online=c.is_online,
+            rating=c.rating,
+            created_at=str(c.user.created_at) if hasattr(c, 'user') and c.user else "N/A"
+        ) for c in couriers
+    ]
 
-@router.post("/")
-async def create_courier(courier: CourierCreate):
-    """Create a new courier"""
-    try:
-        result = supabase_admin.table("couriers").insert({
-            "name": courier.name,
-            "phone": courier.phone,
-            "email": courier.email,
-            "vehicle_type": courier.vehicle_type,
-            "license_plate": courier.license_plate,
-            "status": "offline"
-        }).execute()
+@router.put("/status")
+async def toggle_online_status(
+    is_online: bool,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Toggle courier online/offline status"""
+    if current_user.role != UserRole.COURIER:
+        raise HTTPException(status_code=403, detail="Only couriers can update status")
+    
+    courier_result = await db.execute(select(Courier).where(Courier.user_id == current_user.id))
+    courier = courier_result.scalar_one_or_none()
+    
+    if not courier:
+        raise HTTPException(status_code=404, detail="Courier profile not found")
+    
+    courier.is_online = is_online
+    await db.commit()
+    
+    return {
+        "message": f"Status updated to {'online' if is_online else 'offline'}",
+        "is_online": is_online
+    }
 
-        return result.data[0] if result.data else None
+@router.get("/earnings")
+async def get_courier_earnings(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get courier earnings summary"""
+    if current_user.role != UserRole.COURIER:
+        raise HTTPException(status_code=403, detail="Only couriers can access earnings")
+    
+    courier_result = await db.execute(select(Courier).where(Courier.user_id == current_user.id))
+    courier = courier_result.scalar_one_or_none()
+    
+    if not courier:
+        raise HTTPException(status_code=404, detail="Courier profile not found")
+    
+    # Get total earnings
+    from app.models.orm import Earning
+    earnings_result = await db.execute(select(Earning).where(Earning.courier_id == courier.id))
+    earnings = earnings_result.scalars().all()
+    
+    total = sum(e.amount for e in earnings)
+    
+    return {
+        "total_earnings": total,
+        "num_deliveries": len(earnings),
+        "average_per_delivery": total / len(earnings) if earnings else 0
+    }
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to create courier: {str(e)}")
-
-@router.get("/")
-async def list_couriers(status: Optional[str] = None, limit: int = 100):
-    """List all couriers"""
-    try:
-        query = supabase_admin.table("couriers").select("*")
-
-        if status:
-            query = query.eq("status", status)
-
-        result = query.order("created_at", desc=True).limit(limit).execute()
-
-        return {"couriers": result.data, "count": len(result.data)}
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch couriers: {str(e)}")
-
-@router.get("/{courier_id}")
-async def get_courier(courier_id: str):
-    """Get courier details"""
-    try:
-        result = supabase_admin.table("couriers") \
-            .select("*") \
-            .eq("id", courier_id) \
-            .maybeSingle() \
-            .execute()
-
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Courier not found")
-
-        return result.data
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch courier: {str(e)}")
-
-@router.patch("/{courier_id}")
-async def update_courier(courier_id: str, update: CourierUpdate):
-    """Update courier information"""
-    try:
-        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-
-        if not update_data:
-            raise HTTPException(status_code=400, detail="No update data provided")
-
-        result = supabase_admin.table("couriers") \
-            .update(update_data) \
-            .eq("id", courier_id) \
-            .execute()
-
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Courier not found")
-
-        return result.data[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to update courier: {str(e)}")
-
-@router.delete("/{courier_id}")
-async def delete_courier(courier_id: str):
-    """Delete a courier"""
-    try:
-        result = supabase_admin.table("couriers") \
-            .delete() \
-            .eq("id", courier_id) \
-            .execute()
-
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Courier not found")
-
-        return {"success": True, "message": "Courier deleted successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to delete courier: {str(e)}")
-
-@router.get("/{courier_id}/stats")
-async def get_courier_stats(courier_id: str):
-    """Get courier statistics"""
-    try:
-        courier = supabase_admin.table("couriers") \
-            .select("*") \
-            .eq("id", courier_id) \
-            .maybeSingle() \
-            .execute()
-
-        if not courier.data:
-            raise HTTPException(status_code=404, detail="Courier not found")
-
-        orders = supabase_admin.table("orders") \
-            .select("status, created_at, delivered_at") \
-            .eq("courier_id", courier_id) \
-            .execute()
-
-        completed = len([o for o in orders.data if o["status"] == "delivered"])
-        in_progress = len([o for o in orders.data if o["status"] in ["assigned", "picked_up", "in_transit"]])
-
-        return {
-            "courier": courier.data,
-            "statistics": {
-                "total_deliveries": courier.data["total_deliveries"],
-                "rating": float(courier.data["rating"]),
-                "completed_orders": completed,
-                "orders_in_progress": in_progress,
-                "current_status": courier.data["status"]
-            }
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch stats: {str(e)}")
+@router.get("/performance")
+async def get_courier_performance(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get courier performance metrics"""
+    if current_user.role != UserRole.COURIER:
+        raise HTTPException(status_code=403, detail="Only couriers can access performance")
+    
+    courier_result = await db.execute(select(Courier).where(Courier.user_id == current_user.id))
+    courier = courier_result.scalar_one_or_none()
+    
+    if not courier:
+        raise HTTPException(status_code=404, detail="Courier profile not found")
+    
+    # Get completed orders
+    orders_result = await db.execute(
+        select(Order).where(
+            and_(
+                Order.courier_id == courier.id,
+                Order.status == OrderStatus.DELIVERED
+            )
+        )
+    )
+    completed_orders = orders_result.scalars().all()
+    
+    # Get ratings
+    from app.models.orm import Rating
+    ratings_result = await db.execute(select(Rating).where(Rating.courier_id == courier.id))
+    ratings = ratings_result.scalars().all()
+    
+    avg_rating = sum(r.score for r in ratings) / len(ratings) if ratings else 0.0
+    
+    return {
+        "completed_deliveries": len(completed_orders),
+        "current_rating": courier.rating,
+        "average_rating": avg_rating,
+        "total_ratings": len(ratings)
+    }

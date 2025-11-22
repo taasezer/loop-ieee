@@ -2,23 +2,17 @@ import httpx
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from app.config import settings
+from app.services.cache_service import cached
 
 class CurrencyService:
     def __init__(self):
         self.api_key = settings.EXCHANGE_RATE_API_KEY
         self.base_url = "https://v6.exchangerate-api.com/v6"
-        self.cache = {}
-        self.cache_duration = timedelta(minutes=30)
+
+    @cached(ttl=1800, key_prefix="currency_rates")
 
     async def get_exchange_rates(self, base_currency: str = "USD") -> Optional[Dict]:
         """Get latest exchange rates for base currency"""
-        cache_key = f"rates_{base_currency}"
-
-        if cache_key in self.cache:
-            cached_data, cached_time = self.cache[cache_key]
-            if datetime.now() - cached_time < self.cache_duration:
-                return cached_data
-
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.get(
@@ -28,15 +22,12 @@ class CurrencyService:
                 data = response.json()
 
                 if data["result"] == "success":
-                    result = {
+                    return {
                         "base_currency": base_currency,
                         "last_updated": data["time_last_update_utc"],
                         "next_update": data["time_next_update_utc"],
                         "rates": data["conversion_rates"]
                     }
-
-                    self.cache[cache_key] = (result, datetime.now())
-                    return result
 
             return None
         except Exception as e:

@@ -1,195 +1,183 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from typing import List, Optional
+from app.database import get_db
+from app.models.orm import Order, User, OrderStatus
+from app.dependencies import get_current_user
+from app.services.pricing import calculate_order_price
 from pydantic import BaseModel
-from typing import Optional
-from app.database import supabase_admin
-from app.services.maps_service import maps_service
-from datetime import datetime
+from app.services.order_workflow import order_workflow_service
 
 router = APIRouter()
 
 class OrderCreate(BaseModel):
-    customer_name: str
-    customer_phone: str
+    pickup_address: str
+    pickup_latitude: float
+    pickup_longitude: float
+    delivery_address: str
+    delivery_latitude: float
+    delivery_longitude: float
+    distance_km: float # In a real app, this would be calculated server-side via OSRM
+
+class OrderResponse(BaseModel):
+    id: int
+    status: str
+    price: float
     pickup_address: str
     delivery_address: str
-    package_weight: float
-    package_description: str
-    delivery_notes: Optional[str] = None
-    priority: int = 1
+    created_at: str
 
-class OrderUpdate(BaseModel):
-    status: Optional[str] = None
-    courier_id: Optional[str] = None
-    delivery_notes: Optional[str] = None
+    class Config:
+        from_attributes = True
 
-@router.post("/")
-async def create_order(order: OrderCreate):
-    """Create a new delivery order"""
-    try:
-        pickup_coords = maps_service.geocode_address(order.pickup_address)
-        delivery_coords = maps_service.geocode_address(order.delivery_address)
-
-        if not pickup_coords or not delivery_coords:
-            raise HTTPException(status_code=400, detail="Invalid address provided")
-
-        distance_data = maps_service.calculate_distance_duration(
-            (pickup_coords["latitude"], pickup_coords["longitude"]),
-            (delivery_coords["latitude"], delivery_coords["longitude"])
-        )
-
-        order_data = {
-            "customer_name": order.customer_name,
-            "customer_phone": order.customer_phone,
-            "pickup_latitude": pickup_coords["latitude"],
-            "pickup_longitude": pickup_coords["longitude"],
-            "pickup_address": pickup_coords["formatted_address"],
-            "delivery_latitude": delivery_coords["latitude"],
-            "delivery_longitude": delivery_coords["longitude"],
-            "delivery_address": delivery_coords["formatted_address"],
-            "package_weight": order.package_weight,
-            "package_description": order.package_description,
-            "delivery_notes": order.delivery_notes,
-            "priority": order.priority,
-            "status": "pending",
-            "distance_km": distance_data["distance_km"] if distance_data else None,
-            "estimated_duration_minutes": int(distance_data["duration_minutes"]) if distance_data else None
-        }
-
-        result = supabase_admin.table("orders").insert(order_data).execute()
-
-        return result.data[0] if result.data else None
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to create order: {str(e)}")
-
-@router.get("/")
-async def list_orders(
-    status: Optional[str] = None,
-    courier_id: Optional[str] = None,
-    limit: int = 100
+@router.post("/", response_model=OrderResponse)
+async def create_order(
+    order_in: OrderCreate, 
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
 ):
-    """List orders with optional filters"""
-    try:
-        query = supabase_admin.table("orders").select("*")
+    # Calculate price
+    price = await calculate_order_price(db, order_in.distance_km)
+    
+    new_order = Order(
+        customer_id=current_user.id,
+        pickup_address=order_in.pickup_address,
+        pickup_latitude=order_in.pickup_latitude,
+        pickup_longitude=order_in.pickup_longitude,
+        delivery_address=order_in.delivery_address,
+        delivery_latitude=order_in.delivery_latitude,
+        delivery_longitude=order_in.delivery_longitude,
+        distance_km=order_in.distance_km,
+        price=price,
+        status=OrderStatus.CREATED
+    )
+    
+    db.add(new_order)
+    await db.commit()
+    await db.refresh(new_order)
+    
+    return OrderResponse(
+        id=new_order.id,
+        status=new_order.status,
+        price=new_order.price,
+        pickup_address=new_order.pickup_address,
+        delivery_address=new_order.delivery_address,
+        created_at=str(new_order.created_at)
+    )
 
-        if status:
-            query = query.eq("status", status)
+@router.get("/", response_model=List[OrderResponse])
+async def get_orders(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Order).where(Order.customer_id == current_user.id))
+    orders = result.scalars().all()
+    return [
+        OrderResponse(
+            id=o.id,
+            status=o.status,
+            price=o.price,
+            pickup_address=o.pickup_address,
+            delivery_address=o.delivery_address,
+            created_at=str(o.created_at)
+        ) for o in orders
+    ]
 
-        if courier_id:
-            query = query.eq("courier_id", courier_id)
+@router.get("/active", response_model=List[OrderResponse])
+async def get_active_orders(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get active (non-completed) orders for current user"""
+    orders = await order_workflow_service.get_active_orders(
+        db=db,
+        user_id=current_user.id
+    )
+    
+    return [
+        OrderResponse(
+            id=o.id,
+            status=o.status,
+            price=o.price,
+            pickup_address=o.pickup_address,
+            delivery_address=o.delivery_address,
+            created_at=str(o.created_at)
+        ) for o in orders
+    ]
 
-        result = query.order("created_at", desc=True).limit(limit).execute()
+@router.get("/{order_id}", response_model=OrderResponse)
+async def get_order(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if order.customer_id != current_user.id: # Add admin check later
+         raise HTTPException(status_code=403, detail="Not authorized")
 
-        return {"orders": result.data, "count": len(result.data)}
+    return OrderResponse(
+        id=order.id,
+        status=order.status,
+        price=order.price,
+        pickup_address=order.pickup_address,
+        delivery_address=order.delivery_address,
+        created_at=str(order.created_at)
+    )
 
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch orders: {str(e)}")
-
-@router.get("/{order_id}")
-async def get_order(order_id: str):
-    """Get order details"""
-    try:
-        result = supabase_admin.table("orders") \
-            .select("*") \
-            .eq("id", order_id) \
-            .maybeSingle() \
-            .execute()
-
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        return result.data
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to fetch order: {str(e)}")
-
-@router.patch("/{order_id}")
-async def update_order(order_id: str, update: OrderUpdate):
-    """Update order status or details"""
-    try:
-        update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-
-        if not update_data:
-            raise HTTPException(status_code=400, detail="No update data provided")
-
-        if "status" in update_data:
-            if update_data["status"] == "picked_up":
-                update_data["picked_up_at"] = datetime.utcnow().isoformat()
-            elif update_data["status"] == "delivered":
-                update_data["delivered_at"] = datetime.utcnow().isoformat()
-
-        if "courier_id" in update_data:
-            update_data["assigned_at"] = datetime.utcnow().isoformat()
-            update_data["status"] = "assigned"
-
-        result = supabase_admin.table("orders") \
-            .update(update_data) \
-            .eq("id", order_id) \
-            .execute()
-
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        if "courier_id" in update_data and update_data["status"] == "assigned":
-            courier = supabase_admin.table("couriers") \
-                .update({"status": "busy"}) \
-                .eq("id", update_data["courier_id"]) \
-                .execute()
-
-        return result.data[0]
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to update order: {str(e)}")
-
-@router.delete("/{order_id}")
-async def cancel_order(order_id: str):
+@router.post("/{order_id}/cancel")
+async def cancel_order(
+    order_id: int,
+    reason: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """Cancel an order"""
-    try:
-        result = supabase_admin.table("orders") \
-            .update({"status": "cancelled"}) \
-            .eq("id", order_id) \
-            .execute()
+    # Verify order belongs to user
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if order.customer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    # Cancel order
+    cancel_result = await order_workflow_service.cancel_order(
+        db=db,
+        order_id=order_id,
+        user_id=current_user.id,
+        reason=reason
+    )
+    
+    if not cancel_result["success"]:
+        raise HTTPException(status_code=400, detail=cancel_result["error"])
+    
+    return {"message": "Order cancelled successfully", **cancel_result}
 
-        if not result.data:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        return {"success": True, "message": "Order cancelled successfully"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to cancel order: {str(e)}")
-
-@router.get("/{order_id}/route")
-async def get_order_route(order_id: str):
-    """Get optimized route for order"""
-    try:
-        order = supabase_admin.table("orders") \
-            .select("*") \
-            .eq("id", order_id) \
-            .maybeSingle() \
-            .execute()
-
-        if not order.data:
-            raise HTTPException(status_code=404, detail="Order not found")
-
-        pickup = (order.data["pickup_latitude"], order.data["pickup_longitude"])
-        delivery = (order.data["delivery_latitude"], order.data["delivery_longitude"])
-
-        route = maps_service.get_route(pickup, delivery)
-
-        if not route:
-            raise HTTPException(status_code=400, detail="Could not calculate route")
-
-        return route
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to get route: {str(e)}")
+@router.put("/{order_id}/status")
+async def update_order_status(
+    order_id: int,
+    new_status: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update order status (admin only)"""
+    # TODO: Add admin role check
+    result = await order_workflow_service.update_order_status(
+        db=db,
+        order_id=order_id,
+        new_status=new_status,
+        user_id=current_user.id
+    )
+    
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    
+    return {"message": "Status updated successfully", **result}

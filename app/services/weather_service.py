@@ -1,12 +1,14 @@
 import httpx
 from typing import Dict, Optional
 from app.config import settings
+from app.services.cache_service import cached
 
 class WeatherService:
     def __init__(self):
         self.api_key = settings.OPENWEATHER_API_KEY
         self.base_url = "https://api.openweathermap.org/data/2.5"
 
+    @cached(ttl=600, key_prefix="weather")
     async def get_current_weather(self, latitude: float, longitude: float) -> Optional[Dict]:
         """Get current weather conditions for a location"""
         try:
@@ -42,6 +44,7 @@ class WeatherService:
             print(f"Weather API error: {e}")
             return None
 
+    @cached(ttl=1800, key_prefix="weather_forecast")
     async def get_weather_forecast(self, latitude: float, longitude: float, hours: int = 24) -> Optional[Dict]:
         """Get weather forecast for next X hours"""
         try:

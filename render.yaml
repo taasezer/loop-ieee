@@ -1,0 +1,58 @@
+services:
+  # FastAPI Web Service
+  - type: web
+    name: loop-logistics-api
+    env: python
+    region: frankfurt  # or oregon, singapore, etc.
+    plan: free  # or starter, standard
+    buildCommand: "./build.sh"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: loop-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: loop-redis
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: CORS_ORIGINS
+        value: http://localhost:5173,https://your-frontend.vercel.app
+      # Add your API keys here
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false
+      - key: EXCHANGE_RATE_API_KEY
+        sync: false
+
+  # PostgreSQL Database
+  - type: pserv
+    name: loop-db
+    env: docker
+    plan: free
+    region: frankfurt
+    image: postgres:15
+    envVars:
+      - key: POSTGRES_USER
+        value: loop_user
+      - key: POSTGRES_PASSWORD
+        generateValue: true
+      - key: POSTGRES_DB
+        value: loop_logistics
+
+  # Redis Cache
+  - type: redis
+    name: loop-redis
+    plan: free
+    region: frankfurt
+    maxmemoryPolicy: allkeys-lru
