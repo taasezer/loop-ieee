@@ -7,5 +7,8 @@ pip install --upgrade pip
 # Install dependencies
 pip install -r requirements.txt
 
-# Database migrations (if needed)
-# alembic upgrade head
+# Install PDF generation dependencies
+pip install reportlab matplotlib
+
+# Database migrations
+alembic upgrade head

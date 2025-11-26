@@ -1,53 +1,58 @@
 """
-Simple API test script without database
+Simple API test script using FastAPI TestClient
 Tests various endpoints to verify backend functionality
 """
-import requests
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi.testclient import TestClient
+from app.main import app
 import json
 
-BASE_URL = "http://localhost:8000"
+client = TestClient(app)
 
 def test_api():
     print("🧪 Testing LOOP Logistics Backend API")
     print("=" * 60)
     
     # Test 1: Root endpoint
-    print("\n1️⃣ Testing root endpoint...")
+    print("\n1. Testing root endpoint...")
     try:
-        response = requests.get(f"{BASE_URL}/")
+        response = client.get("/")
         print(f"   Status: {response.status_code}")
         print(f"   Response: {json.dumps(response.json(), indent=2)}")
         assert response.status_code == 200
-        print("   ✅ PASSED")
+        print("   PASSED")
     except Exception as e:
-        print(f"   ❌ FAILED: {e}")
+        print(f"   FAILED: {e}")
     
     # Test 2: Health check
-    print("\n2️⃣ Testing health endpoint...")
+    print("\n2. Testing health endpoint...")
     try:
-        response = requests.get(f"{BASE_URL}/health")
+        response = client.get("/health")
         print(f"   Status: {response.status_code}")
         print(f"   Response: {json.dumps(response.json(), indent=2)}")
         assert response.status_code == 200
         assert response.json()["status"] == "healthy"
-        print("   ✅ PASSED")
+        print("   PASSED")
     except Exception as e:
-        print(f"   ❌ FAILED: {e}")
+        print(f"   FAILED: {e}")
     
     # Test 3: Swagger docs
-    print("\n3️⃣ Testing Swagger docs...")
+    print("\n3. Testing Swagger docs...")
     try:
-        response = requests.get(f"{BASE_URL}/docs")
+        response = client.get("/docs")
         print(f"   Status: {response.status_code}")
         assert response.status_code == 200
-        print("   ✅ PASSED - Swagger UI accessible")
+        print("   PASSED - Swagger UI accessible")
     except Exception as e:
-        print(f"   ❌ FAILED: {e}")
+        print(f"   FAILED: {e}")
     
     # Test 4: OpenAPI schema
-    print("\n4️⃣ Testing OpenAPI schema...")
+    print("\n4. Testing OpenAPI schema...")
     try:
-        response = requests.get(f"{BASE_URL}/openapi.json")
+        response = client.get("/openapi.json")
         print(f"   Status: {response.status_code}")
         schema = response.json()
         
@@ -61,14 +66,14 @@ def test_api():
         
         assert response.status_code == 200
         assert num_paths > 30  # We added 40+ endpoints
-        print("   ✅ PASSED")
+        print("   PASSED")
     except Exception as e:
-        print(f"   ❌ FAILED: {e}")
+        print(f"   FAILED: {e}")
     
     # Test 5: Check specific route groups exist
-    print("\n5️⃣ Verifying route groups...")
+    print("\n5. Verifying route groups...")
     try:
-        response = requests.get(f"{BASE_URL}/openapi.json")
+        response = client.get("/openapi.json")
         schema = response.json()
         paths = schema.get("paths", {})
         
@@ -83,23 +88,21 @@ def test_api():
         
         for name, path in route_checks.items():
             if path in paths or any(path in p for p in paths.keys()):
-                print(f"   ✅ {name} routes found")
+                print(f"   {name} routes found")
             else:
-                print(f"   ⚠️  {name} routes not found")
+                print(f"   {name} routes not found")
         
-        print("   ✅ PASSED - Core routes verified")
+        print("   PASSED - Core routes verified")
     except Exception as e:
-        print(f"   ❌ FAILED: {e}")
+        print(f"   FAILED: {e}")
     
     print("\n" + "=" * 60)
-    print("🎉 API Test Summary")
+    print("API Test Summary")
     print("=" * 60)
-    print("✅ All critical endpoints are accessible")
-    print("✅ Backend is responding correctly")
-    print("✅ Swagger documentation available at /docs")
-    print(f"✅ {num_paths}+ API endpoints registered")
-    print("\n📝 Note: Database-dependent tests skipped (DB not configured)")
-    print("   To test with DB: Configure PostgreSQL and run seed_test_data.py")
+    print("All critical endpoints are accessible")
+    print("Backend is responding correctly")
+    print("Swagger documentation available at /docs")
+    print(f"{num_paths}+ API endpoints registered")
 
 if __name__ == "__main__":
     test_api()

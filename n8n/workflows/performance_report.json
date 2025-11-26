@@ -1,0 +1,293 @@
+{
+    "name": "LOOP Performance Report",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "cronExpression",
+                            "expression": "0 0 * * *"
+                        }
+                    ]
+                }
+            },
+            "name": "Schedule - Daily Midnight",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "notes": "Runs every day at midnight",
+            "id": "schedule-daily"
+        },
+        {
+            "parameters": {
+                "functionCode": "const now = new Date();\nconst yesterday = new Date(now);\nyesterday.setDate(yesterday.getDate() - 1);\n\nconst startDate = yesterday.toISOString().split('T')[0];\nconst endDate = now.toISOString().split('T')[0];\n\nconsole.log(`Generating performance report for ${startDate}`);\n\nreturn {\n  json: {\n    start_date: startDate,\n    end_date: endDate,\n    report_type: 'daily'\n  }\n};"
+            },
+            "name": "Set Date Range",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                470,
+                300
+            ],
+            "id": "set-date-range"
+        },
+        {
+            "parameters": {
+                "url": "={{$env.LOOP_API_URL}}/api/analytics/delivery-metrics",
+                "method": "GET",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "start_date",
+                            "value": "={{$json.start_date}}"
+                        },
+                        {
+                            "name": "end_date",
+                            "value": "={{$json.end_date}}"
+                        }
+                    ]
+                },
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 20000
+                }
+            },
+            "name": "Get Delivery Metrics",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                690,
+                200
+            ],
+            "id": "get-delivery-metrics"
+        },
+        {
+            "parameters": {
+                "url": "={{$env.LOOP_API_URL}}/api/admin/couriers",
+                "method": "GET",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 20000
+                }
+            },
+            "name": "Get Courier Stats",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                690,
+                400
+            ],
+            "id": "get-courier-stats"
+        },
+        {
+            "parameters": {
+                "assignments": {
+                    "assignments": [
+                        {
+                            "id": "metrics",
+                            "name": "delivery_metrics",
+                            "value": "={{$('Get Delivery Metrics').first().json}}",
+                            "type": "object"
+                        },
+                        {
+                            "id": "couriers",
+                            "name": "courier_stats",
+                            "value": "={{$('Get Courier Stats').first().json}}",
+                            "type": "object"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "name": "Merge Data",
+            "type": "n8n-nodes-base.set",
+            "typeVersion": 3.2,
+            "position": [
+                910,
+                300
+            ],
+            "id": "merge-data"
+        },
+        {
+            "parameters": {
+                "functionCode": "const metrics = $json.delivery_metrics;\nconst couriers = $json.courier_stats;\nconst timestamp = new Date().toISOString();\nconst reportDate = $('Set Date Range').first().json.start_date;\n\n// Process courier performance\nconst courierList = couriers.couriers || [];\nconst topPerformers = courierList\n  .sort((a, b) => (b.total_deliveries || 0) - (a.total_deliveries || 0))\n  .slice(0, 5);\n\nconst needsImprovement = courierList\n  .filter(c => (c.average_rating || 0) < 4.0)\n  .sort((a, b) => (a.average_rating || 0) - (b.average_rating || 0))\n  .slice(0, 3);\n\n// Calculate bonus recommendations\nconst bonusRecommendations = topPerformers.map(courier => ({\n  courier_name: courier.name,\n  deliveries: courier.total_deliveries || 0,\n  rating: courier.average_rating || 0,\n  suggested_bonus: Math.round((courier.total_deliveries || 0) * 5) // $5 per delivery\n}));\n\n// Build report\nconst report = {\n  report_date: reportDate,\n  generated_at: timestamp,\n  summary: {\n    total_deliveries: metrics.total_deliveries || 0,\n    completed_deliveries: metrics.completed_deliveries || 0,\n    cancelled_deliveries: metrics.cancelled_deliveries || 0,\n    average_delivery_time: metrics.average_delivery_time_minutes || 0,\n    on_time_rate: metrics.on_time_percentage || 0\n  },\n  top_performers: topPerformers.map(c => ({\n    name: c.name,\n    deliveries: c.total_deliveries || 0,\n    rating: c.average_rating || 0,\n    earnings: c.total_earnings || 0\n  })),\n  needs_improvement: needsImprovement.map(c => ({\n    name: c.name,\n    rating: c.average_rating || 0,\n    deliveries: c.total_deliveries || 0,\n    issues: 'Low customer rating'\n  })),\n  bonus_recommendations: bonusRecommendations,\n  total_bonus_pool: bonusRecommendations.reduce((sum, b) => sum + b.suggested_bonus, 0)\n};\n\nconsole.log(`Performance report generated for ${reportDate}`);\nconsole.log(`Top performer: ${topPerformers[0]?.name || 'N/A'} with ${topPerformers[0]?.total_deliveries || 0} deliveries`);\n\nreturn { json: report };"
+            },
+            "name": "Generate Report",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1130,
+                300
+            ],
+            "id": "generate-report"
+        },
+        {
+            "parameters": {
+                "functionCode": "const report = $input.first().json;\n\n// Build HTML email\nconst html = `\n<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }\n    .section { margin: 20px; padding: 15px; border-left: 4px solid #4CAF50; }\n    .metric { display: inline-block; margin: 10px; padding: 10px; background: #f4f4f4; border-radius: 5px; }\n    .metric-value { font-size: 24px; font-weight: bold; color: #4CAF50; }\n    table { width: 100%; border-collapse: collapse; margin: 10px 0; }\n    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }\n    th { background: #4CAF50; color: white; }\n    .good { color: #4CAF50; font-weight: bold; }\n    .warning { color: #ff9800; font-weight: bold; }\n    .footer { text-align: center; margin: 20px; color: #666; font-size: 12px; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>📊 LOOP Daily Performance Report</h1>\n    <p>${report.report_date}</p>\n  </div>\n  \n  <div class=\"section\">\n    <h2>📈 Daily Summary</h2>\n    <div class=\"metric\">\n      <div>Total Deliveries</div>\n      <div class=\"metric-value\">${report.summary.total_deliveries}</div>\n    </div>\n    <div class=\"metric\">\n      <div>Completed</div>\n      <div class=\"metric-value good\">${report.summary.completed_deliveries}</div>\n    </div>\n    <div class=\"metric\">\n      <div>Cancelled</div>\n      <div class=\"metric-value warning\">${report.summary.cancelled_deliveries}</div>\n    </div>\n    <div class=\"metric\">\n      <div>Avg Delivery Time</div>\n      <div class=\"metric-value\">${Math.round(report.summary.average_delivery_time)} min</div>\n    </div>\n    <div class=\"metric\">\n      <div>On-Time Rate</div>\n      <div class=\"metric-value good\">${report.summary.on_time_rate}%</div>\n    </div>\n  </div>\n  \n  <div class=\"section\">\n    <h2>🏆 Top Performers</h2>\n    <table>\n      <tr>\n        <th>Courier</th>\n        <th>Deliveries</th>\n        <th>Rating</th>\n        <th>Earnings</th>\n        <th>Suggested Bonus</th>\n      </tr>\n      ${report.top_performers.map((p, i) => {\n        const bonus = report.bonus_recommendations[i];\n        return `\n        <tr>\n          <td>${p.name}</td>\n          <td>${p.deliveries}</td>\n          <td class=\"good\">⭐ ${p.rating.toFixed(1)}</td>\n          <td>$${p.earnings.toFixed(2)}</td>\n          <td class=\"good\">$${bonus.suggested_bonus}</td>\n        </tr>\n        `;\n      }).join('')}\n    </table>\n    <p><strong>Total Bonus Pool: $${report.total_bonus_pool}</strong></p>\n  </div>\n  \n  ${report.needs_improvement.length > 0 ? `\n  <div class=\"section\">\n    <h2>⚠️ Needs Improvement</h2>\n    <table>\n      <tr>\n        <th>Courier</th>\n        <th>Rating</th>\n        <th>Deliveries</th>\n        <th>Issue</th>\n      </tr>\n      ${report.needs_improvement.map(c => `\n      <tr>\n        <td>${c.name}</td>\n        <td class=\"warning\">⭐ ${c.rating.toFixed(1)}</td>\n        <td>${c.deliveries}</td>\n        <td>${c.issues}</td>\n      </tr>\n      `).join('')}\n    </table>\n  </div>\n  ` : ''}\n  \n  <div class=\"footer\">\n    <p>Generated automatically by LOOP n8n Performance Report</p>\n    <p>${report.generated_at}</p>\n  </div>\n</body>\n</html>\n`;\n\nreturn {\n  json: {\n    to: process.env.ADMIN_EMAIL || 'admin@loop.com',\n    subject: `📊 LOOP Daily Performance Report - ${report.report_date}`,\n    html: html,\n    report_summary: `${report.summary.completed_deliveries} deliveries, ${report.on_time_rate}% on-time`\n  }\n};"
+            },
+            "name": "Format Email",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1350,
+                300
+            ],
+            "id": "format-email"
+        },
+        {
+            "parameters": {
+                "functionCode": "// In production, integrate with SendGrid, AWS SES, or similar\nconst data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] Performance report email prepared`);\nconsole.log(`To: ${data.to}`);\nconsole.log(`Subject: ${data.subject}`);\nconsole.log(`Summary: ${data.report_summary}`);\n\n// PRODUCTION CODE (uncomment when ready):\n// const sendgridUrl = 'https://api.sendgrid.com/v3/mail/send';\n// return await $http.post(sendgridUrl, {\n//   personalizations: [{ to: [{ email: data.to }] }],\n//   from: { email: process.env.SENDGRID_FROM_EMAIL },\n//   subject: data.subject,\n//   content: [{ type: 'text/html', value: data.html }]\n// }, {\n//   headers: { 'Authorization': `Bearer ${process.env.SENDGRID_API_KEY}` }\n// });\n\nreturn {\n  json: {\n    email_sent: true,\n    simulated: true,\n    to: data.to,\n    subject: data.subject,\n    sent_at: timestamp\n  }\n};"
+            },
+            "name": "Send Email (Simulated)",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1570,
+                300
+            ],
+            "id": "send-email"
+        },
+        {
+            "parameters": {
+                "functionCode": "const result = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] ✅ Daily performance report workflow completed successfully`);\n\nreturn { json: result };"
+            },
+            "name": "Log Success",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1790,
+                300
+            ],
+            "id": "log-success"
+        }
+    ],
+    "connections": {
+        "Schedule - Daily Midnight": {
+            "main": [
+                [
+                    {
+                        "node": "Set Date Range",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Set Date Range": {
+            "main": [
+                [
+                    {
+                        "node": "Get Delivery Metrics",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Get Courier Stats",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Delivery Metrics": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Courier Stats": {
+            "main": [
+                [
+                    {
+                        "node": "Merge Data",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Merge Data": {
+            "main": [
+                [
+                    {
+                        "node": "Generate Report",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Generate Report": {
+            "main": [
+                [
+                    {
+                        "node": "Format Email",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Format Email": {
+            "main": [
+                [
+                    {
+                        "node": "Send Email (Simulated)",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send Email (Simulated)": {
+            "main": [
+                [
+                    {
+                        "node": "Log Success",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": null,
+    "tags": [],
+    "triggerCount": 0,
+    "updatedAt": "2025-11-23T00:00:00.000Z",
+    "versionId": "1"
+}

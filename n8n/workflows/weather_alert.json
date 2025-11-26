@@ -1,5 +1,5 @@
 {
-  "name": "LOOP Weather Alert",
+  "name": "LOOP Weather Alert Enhanced",
   "nodes": [
     {
       "parameters": {
@@ -15,18 +15,58 @@
       "name": "Schedule - Every 30 min",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ],
+      "id": "schedule-trigger"
     },
     {
       "parameters": {
         "url": "={{$env.LOOP_API_URL}}/api/tracking/active",
         "method": "GET",
-        "options": {}
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 2,
+            "waitBetweenTries": 500
+          }
+        }
       },
       "name": "Get Active Couriers",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [470, 300]
+      "position": [
+        470,
+        300
+      ],
+      "id": "get-active-couriers",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierCount = data.total_active_couriers || 0;\n\nconsole.log(`[${timestamp}] Weather check: ${courierCount} active couriers`);\n\nif (courierCount === 0) {\n  console.log('No active couriers, skipping weather checks');\n  return [];\n}\n\n// Extract couriers array\nreturn data.couriers.map(courier => ({\n  json: courier\n}));"
+      },
+      "name": "Extract Couriers",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        690,
+        300
+      ],
+      "id": "extract-couriers"
     },
     {
       "parameters": {
@@ -36,81 +76,350 @@
       "name": "Split Couriers",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [690, 300]
+      "position": [
+        910,
+        300
+      ],
+      "id": "split-couriers"
     },
     {
       "parameters": {
         "url": "={{$env.LOOP_API_URL}}/api/weather/impact",
         "method": "POST",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+            }
+          ]
+        },
         "jsonParameters": true,
-        "options": {},
-        "bodyParametersJson": "={\"latitude\": {{$json.latitude}}, \"longitude\": {{$json.longitude}}}"
+        "options": {
+          "timeout": 10000
+        },
+        "bodyParametersJson": "={\"latitude\": {{$json.latitude}}, \"longitude\": {{$json.longitude}}, \"courier_id\": {{$json.courier_id}}}"
       },
       "name": "Check Weather Impact",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
-      "position": [910, 300]
+      "position": [
+        1130,
+        300
+      ],
+      "id": "check-weather-impact",
+      "onError": "continueErrorOutput"
     },
     {
       "parameters": {
         "conditions": {
-          "number": [
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "value1": "={{$json.impact_score}}",
-              "operation": "smaller",
-              "value2": 0.5
+              "leftValue": "={{$json.alert_required}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            },
+            {
+              "leftValue": "={{$json.impact_score}}",
+              "rightValue": 0.7,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
             }
-          ]
+          ],
+          "combineOperation": "any"
         }
       },
-      "name": "Dangerous Weather",
+      "name": "Alert Required?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
-      "position": [1130, 300]
+      "typeVersion": 2,
+      "position": [
+        1350,
+        300
+      ],
+      "id": "check-alert-required"
     },
     {
       "parameters": {
-        "functionCode": "const courier = $input.first().json;\n\nreturn {\n  json: {\n    courier_id: courier.courier_id,\n    courier_name: courier.courier_name,\n    weather: courier.weather_conditions.description,\n    recommendation: courier.recommendation,\n    alert: `WEATHER ALERT: ${courier.recommendation}. Current: ${courier.weather_conditions.description}`\n  }\n};"
+        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierId = data.courier_id;\n\n// Check if we recently sent an alert to this courier (throttling)\nconst recentAlerts = $workflow.staticData.recentAlerts || {};\nconst lastAlertTime = recentAlerts[courierId];\nconst throttleDurationMs = 60 * 60 * 1000; // 1 hour\n\nif (lastAlertTime && (Date.now() - lastAlertTime < throttleDurationMs)) {\n  console.log(`[${timestamp}] Alert throttled for courier #${courierId} (last alert: ${new Date(lastAlertTime).toISOString()})`);\n  return [];\n}\n\n// Update last alert time\nrecentAlerts[courierId] = Date.now();\n$workflow.staticData.recentAlerts = recentAlerts;\n\n// Get courier info from previous node\nconst previousData = $('Split Couriers').first().json;\n\nconst severityEmoji = {\n  'critical': '🚨',\n  'high': '⚠️',\n  'moderate': '⚡',\n  'low': '💡',\n  'none': '✅'\n};\n\nconst emoji = severityEmoji[data.severity] || '⚠️';\n\nconsole.log(`[${timestamp}] Sending ${data.severity} weather alert to courier #${courierId}`);\n\nreturn {\n  json: {\n    courier_id: courierId,\n    courier_name: previousData.courier_name,\n    phone: previousData.phone,\n    severity: data.severity,\n    severity_emoji: emoji,\n    condition: data.condition,\n    description: data.description,\n    recommendation: data.recommendation,\n    impact_score: data.impact_score,\n    warnings: data.warnings || [],\n    location: data.location,\n    temperature: data.weather_conditions?.temperature,\n    wind_speed: data.weather_conditions?.wind_speed,\n    visibility: data.weather_conditions?.visibility,\n    timestamp\n  }\n};"
       },
-      "name": "Prepare Alert",
-      "type": "n8n-nodes-base.function",
-      "typeVersion": 1,
-      "position": [1350, 200]
+      "name": "Prepare Alert (Throttled)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1570,
+        200
+      ],
+      "id": "prepare-alert"
     },
     {
       "parameters": {
-        "text": "LOOP Weather Alert\n\nCourier: {{$json.courier_name}}\nCondition: {{$json.weather}}\n{{$json.alert}}\n\nPlease proceed with caution!"
+        "method": "POST",
+        "url": "={{$env.LOOP_API_URL}}/api/notifications",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+            }
+          ]
+        },
+        "jsonParameters": true,
+        "bodyParametersJson": "={\"type\": \"weather_alert\", \"title\": \"{{$json.severity_emoji}} Weather Alert - {{$json.severity.toUpperCase()}}\", \"message\": \"Location: {{$json.location}}\\nCondition: {{$json.description}}\\n\\n{{$json.recommendation}}\\n\\nTemp: {{$json.temperature}}°C | Wind: {{$json.wind_speed}} km/h | Visibility: {{$json.visibility}} km\", \"courier_id\": {{$json.courier_id}}, \"severity\": \"{{$json.severity}}\"}"
       },
-      "name": "Send SMS Alert",
-      "type": "n8n-nodes-base.function",
-      "typeVersion": 1,
-      "position": [1570, 200]
+      "name": "Send Push Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1790,
+        200
+      ],
+      "id": "send-push",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Build SMS message\nconst message = `${data.severity_emoji} LOOP Weather Alert\\n\\nCourier: ${data.courier_name}\\nLocation: ${data.location}\\nCondition: ${data.description}\\n\\n${data.recommendation}\\n\\n${data.warnings.join('\\n') || 'No additional warnings'}\\n\\nStay safe!`;\n\nconsole.log(`[${timestamp}] SMS Alert prepared for ${data.phone}`);\n\nreturn {\n  json: {\n    phone: data.phone,\n    message,\n    courier_id: data.courier_id,\n    severity: data.severity\n  }\n};"
+      },
+      "name": "Prepare SMS",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2010,
+        200
+      ],
+      "id": "prepare-sms"
+    },
+    {
+      "parameters": {
+        "functionCode": "// In production, integrate with Twilio or similar SMS service\nconst data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] SMS Alert sent (simulated) to ${data.phone}`);\nconsole.log(`Message: ${data.message}`);\n\n// PRODUCTION CODE (uncomment when ready):\n// const twilioUrl = 'https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json';\n// return await $http.post(twilioUrl, {\n//   To: data.phone,\n//   From: process.env.TWILIO_PHONE,\n//   Body: data.message\n// });\n\nreturn {\n  json: {\n    success: true,\n    phone: data.phone,\n    severity: data.severity,\n    sent_at: timestamp\n  }\n};"
+      },
+      "name": "Send SMS (Simulated)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2230,
+        200
+      ],
+      "id": "send-sms"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Check if many alerts were triggered (potential system-wide issue)\nconst allAlerts = $workflow.staticData.alertCounts || {};\nconst currentHour = new Date().getHours();\n\nif (!allAlerts[currentHour]) {\n  allAlerts[currentHour] = 0;\n}\n\nallAlerts[currentHour]++;\n$workflow.staticData.alertCounts = allAlerts;\n\nconst threshold = 5; // Alert admin if more than 5 couriers affected\n\nif (allAlerts[currentHour] >= threshold) {\n  console.log(`ADMIN ALERT: ${allAlerts[currentHour]} weather alerts sent this hour`);\n  \n  return {\n    json: {\n      alert_admin: true,\n      alert_count: allAlerts[currentHour],\n      hour: currentHour,\n      message: `Multiple weather alerts triggered (${allAlerts[currentHour]} this hour). System-wide weather issue possible.`\n    }\n  };\n}\n\nreturn [];"
+      },
+      "name": "Check Admin Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2230,
+        350
+      ],
+      "id": "check-admin-alert"
+    },
+    {
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] No alert needed - good weather conditions`);\n\nreturn {\n  json: {\n    skipped: true,\n    reason: 'Weather conditions acceptable',\n    timestamp\n  }\n};"
+      },
+      "name": "Skip Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1570,
+        400
+      ],
+      "id": "skip-alert"
+    },
+    {
+      "parameters": {
+        "functionCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] Weather check error:`, error.message || error);\n\nreturn {\n  json: {\n    error: true,\n    message: error.message || 'API request failed',\n    timestamp\n  }\n};"
+      },
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        690,
+        500
+      ],
+      "id": "handle-error"
     }
   ],
   "connections": {
     "Schedule - Every 30 min": {
-      "main": [[{"node": "Get Active Couriers", "type": "main", "index": 0}]]
-    },
-    "Get Active Couriers": {
-      "main": [[{"node": "Split Couriers", "type": "main", "index": 0}]]
-    },
-    "Split Couriers": {
-      "main": [[{"node": "Check Weather Impact", "type": "main", "index": 0}]]
-    },
-    "Check Weather Impact": {
-      "main": [[{"node": "Dangerous Weather", "type": "main", "index": 0}]]
-    },
-    "Dangerous Weather": {
       "main": [
-        [{"node": "Prepare Alert", "type": "main", "index": 0}],
-        [{"node": "Split Couriers", "type": "main", "index": 0}]
+        [
+          {
+            "node": "Get Active Couriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
-    "Prepare Alert": {
-      "main": [[{"node": "Send SMS Alert", "type": "main", "index": 0}]]
+    "Get Active Couriers": {
+      "main": [
+        [
+          {
+            "node": "Extract Couriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
-    "Send SMS Alert": {
-      "main": [[{"node": "Split Couriers", "type": "main", "index": 0}]]
+    "Extract Couriers": {
+      "main": [
+        [
+          {
+            "node": "Split Couriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Couriers": {
+      "main": [
+        [
+          {
+            "node": "Check Weather Impact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Weather Impact": {
+      "main": [
+        [
+          {
+            "node": "Alert Required?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "error": [
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert Required?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Alert (Throttled)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split Couriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Alert (Throttled)": {
+      "main": [
+        [
+          {
+            "node": "Send Push Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Push Notification": {
+      "main": [
+        [
+          {
+            "node": "Prepare SMS",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check Admin Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare SMS": {
+      "main": [
+        [
+          {
+            "node": "Send SMS (Simulated)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send SMS (Simulated)": {
+      "main": [
+        [
+          {
+            "node": "Split Couriers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Alert": {
+      "main": [
+        []
+      ]
     }
-  }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": {
+    "recentAlerts": {},
+    "alertCounts": {}
+  },
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-11-23T00:00:00.000Z",
+  "versionId": "1"
 }

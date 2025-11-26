@@ -1,5 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from app.config import settings
 from app.routes import maps, weather, currency, tracking, orders, couriers, ai_engine, auth, payments, analytics, notifications, courier_orders, admin, promotions
 from app.websockets.server import manager
@@ -20,6 +21,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Add rate limiting
 app.state.limiter = limiter

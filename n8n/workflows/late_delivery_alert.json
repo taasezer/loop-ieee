@@ -1,0 +1,389 @@
+{
+    "name": "LOOP Late Delivery Alert",
+    "nodes": [
+        {
+            "parameters": {
+                "rule": {
+                    "interval": [
+                        {
+                            "field": "minutes",
+                            "minutesInterval": 5
+                        }
+                    ]
+                }
+            },
+            "name": "Schedule - Every 5 min",
+            "type": "n8n-nodes-base.scheduleTrigger",
+            "typeVersion": 1,
+            "position": [
+                250,
+                300
+            ],
+            "id": "schedule-trigger"
+        },
+        {
+            "parameters": {
+                "url": "={{$env.LOOP_API_URL}}/api/admin/orders",
+                "method": "GET",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendQuery": true,
+                "queryParameters": {
+                    "parameters": [
+                        {
+                            "name": "status",
+                            "value": "in_transit,picked_up"
+                        }
+                    ]
+                },
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "options": {
+                    "timeout": 15000
+                }
+            },
+            "name": "Get Active Orders",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                470,
+                300
+            ],
+            "id": "get-active-orders"
+        },
+        {
+            "parameters": {
+                "functionCode": "const orders = $input.first().json.orders || [];\nconst now = Date.now();\nconst lateOrders = [];\n\nfor (const order of orders) {\n  // Check if order has estimated delivery time\n  if (!order.estimated_delivery_time) continue;\n  \n  const estimatedTime = new Date(order.estimated_delivery_time).getTime();\n  const minutesLate = Math.floor((now - estimatedTime) / (1000 * 60));\n  \n  // Consider late if more than 5 minutes past estimated time\n  if (minutesLate > 5) {\n    lateOrders.push({\n      ...order,\n      minutes_late: minutesLate\n    });\n  }\n}\n\nconst timestamp = new Date().toISOString();\nconsole.log(`[${timestamp}] Found ${lateOrders.length} late deliveries`);\n\nif (lateOrders.length === 0) {\n  return [];\n}\n\nreturn lateOrders.map(order => ({ json: order }));"
+            },
+            "name": "Filter Late Orders",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                690,
+                300
+            ],
+            "id": "filter-late-orders"
+        },
+        {
+            "parameters": {
+                "batchSize": 1,
+                "options": {}
+            },
+            "name": "Process Each Order",
+            "type": "n8n-nodes-base.splitInBatches",
+            "typeVersion": 3,
+            "position": [
+                910,
+                300
+            ],
+            "id": "split-orders"
+        },
+        {
+            "parameters": {
+                "functionCode": "const order = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Check if we already notified about this order being late\nconst notifiedOrders = $workflow.staticData.notifiedLateOrders || {};\n\nif (notifiedOrders[order.id]) {\n  console.log(`[${timestamp}] Already notified about late order #${order.id}`);\n  return [];\n}\n\n// Mark as notified\nnotifiedOrders[order.id] = timestamp;\n$workflow.staticData.notifiedLateOrders = notifiedOrders;\n\n// Calculate new ETA (add 15 minutes to current time)\nconst newEta = new Date(Date.now() + 15 * 60 * 1000);\nconst newEtaStr = newEta.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });\n\n// Determine compensation based on how late\nlet compensation = null;\nif (order.minutes_late > 30) {\n  compensation = {\n    type: 'discount_code',\n    value: 20,\n    code: `LATE${order.id}20`\n  };\n} else if (order.minutes_late > 15) {\n  compensation = {\n    type: 'discount_code',\n    value: 10,\n    code: `LATE${order.id}10`\n  };\n}\n\nconsole.log(`[${timestamp}] Processing late order #${order.id} (${order.minutes_late} min late)`);\n\nreturn {\n  json: {\n    order_id: order.id,\n    customer_id: order.customer_id,\n    courier_id: order.courier_id,\n    minutes_late: order.minutes_late,\n    new_eta: newEtaStr,\n    compensation: compensation,\n    pickup_address: order.pickup_address,\n    delivery_address: order.delivery_address\n  }\n};"
+            },
+            "name": "Check If Already Notified",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1130,
+                300
+            ],
+            "id": "check-notified"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{$env.LOOP_API_URL}}/api/notifications",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "jsonParameters": true,
+                "bodyParametersJson": "={\"type\": \"late_delivery_customer\", \"user_id\": {{$json.customer_id}}, \"title\": \"⏰ Delivery Update\", \"message\": \"We apologize for the delay. Your order is running {{$json.minutes_late}} minutes late.\\n\\nNew estimated arrival: {{$json.new_eta}}\\n\\nWe're very sorry for the inconvenience!\" + ($json.compensation ? \"\\n\\n🎁 As an apology, here's {{$json.compensation.value}}% off your next order: {{$json.compensation.code}}\" : \"\"), \"order_id\": {{$json.order_id}}}"
+            },
+            "name": "Notify Customer",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1350,
+                200
+            ],
+            "id": "notify-customer",
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{$env.LOOP_API_URL}}/api/notifications",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "jsonParameters": true,
+                "bodyParametersJson": "={\"type\": \"late_delivery_courier\", \"courier_id\": {{$json.courier_id}}, \"title\": \"⚠️ Delivery Running Late\", \"message\": \"Order #{{$json.order_id}} is {{$json.minutes_late}} minutes late.\\n\\nPlease prioritize this delivery and update customer if needed.\", \"order_id\": {{$json.order_id}}}"
+            },
+            "name": "Notify Courier",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1350,
+                300
+            ],
+            "id": "notify-courier",
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{$env.LOOP_API_URL}}/api/notifications",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "jsonParameters": true,
+                "bodyParametersJson": "={\"type\": \"late_delivery_admin\", \"title\": \"🚨 Late Delivery Alert\", \"message\": \"Order #{{$json.order_id}} is {{$json.minutes_late}} minutes late.\\n\\nFrom: {{$json.pickup_address}}\\nTo: {{$json.delivery_address}}\" + ($json.compensation ? \"\\n\\nCompensation issued: {{$json.compensation.value}}% discount ({{$json.compensation.code}})\" : \"\"), \"order_id\": {{$json.order_id}}}"
+            },
+            "name": "Notify Admin",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1350,
+                400
+            ],
+            "id": "notify-admin",
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{$env.LOOP_API_URL}}/api/promotions",
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "httpHeaderAuth",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "=Bearer {{$env.LOOP_API_TOKEN}}"
+                        }
+                    ]
+                },
+                "jsonParameters": true,
+                "bodyParametersJson": "={\"code\": \"{{$json.compensation.code}}\", \"discount_percentage\": {{$json.compensation.value}}, \"max_uses\": 1, \"user_id\": {{$json.customer_id}}, \"expires_days\": 30, \"reason\": \"Late delivery compensation for order #{{$json.order_id}}\"}"
+            },
+            "name": "Create Promo Code",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                1570,
+                150
+            ],
+            "id": "create-promo",
+            "onError": "continueErrorOutput"
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": true,
+                        "leftValue": "",
+                        "typeValidation": "strict"
+                    },
+                    "conditions": [
+                        {
+                            "leftValue": "={{$json.compensation}}",
+                            "rightValue": "",
+                            "operator": {
+                                "type": "object",
+                                "operation": "exists"
+                            }
+                        }
+                    ],
+                    "combineOperation": "all"
+                }
+            },
+            "name": "Has Compensation?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1570,
+                300
+            ],
+            "id": "check-compensation"
+        },
+        {
+            "parameters": {
+                "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] ✅ Late delivery alert sent for order #${data.order_id}`);\nif (data.compensation) {\n  console.log(`  Compensation: ${data.compensation.value}% discount (${data.compensation.code})`);\n}\n\nreturn { json: data };"
+            },
+            "name": "Log Alert Sent",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                1790,
+                300
+            ],
+            "id": "log-success"
+        }
+    ],
+    "connections": {
+        "Schedule - Every 5 min": {
+            "main": [
+                [
+                    {
+                        "node": "Get Active Orders",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Get Active Orders": {
+            "main": [
+                [
+                    {
+                        "node": "Filter Late Orders",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Filter Late Orders": {
+            "main": [
+                [
+                    {
+                        "node": "Process Each Order",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Process Each Order": {
+            "main": [
+                [
+                    {
+                        "node": "Check If Already Notified",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Check If Already Notified": {
+            "main": [
+                [
+                    {
+                        "node": "Notify Customer",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Notify Courier",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Notify Admin",
+                        "type": "main",
+                        "index": 0
+                    },
+                    {
+                        "node": "Has Compensation?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Customer": {
+            "main": [
+                [
+                    {
+                        "node": "Log Alert Sent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Courier": {
+            "main": [
+                []
+            ]
+        },
+        "Notify Admin": {
+            "main": [
+                []
+            ]
+        },
+        "Has Compensation?": {
+            "main": [
+                [
+                    {
+                        "node": "Create Promo Code",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                []
+            ]
+        },
+        "Create Promo Code": {
+            "main": [
+                []
+            ]
+        },
+        "Log Alert Sent": {
+            "main": [
+                [
+                    {
+                        "node": "Process Each Order",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "pinData": {},
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "staticData": {
+        "notifiedLateOrders": {}
+    },
+    "tags": [],
+    "triggerCount": 0,
+    "updatedAt": "2025-11-23T00:00:00.000Z",
+    "versionId": "1"
+}

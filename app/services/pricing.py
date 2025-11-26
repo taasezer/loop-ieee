@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func, and_
 from typing import Optional
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from app.models.orm import PricingRule, Order, OrderStatus
 
 async def calculate_order_price(
@@ -69,7 +69,7 @@ async def calculate_surge_pricing(
     current_time = current_time or datetime.utcnow()
     
     # Count active orders in last 15 minutes
-    recent_time = current_time.replace(minute=current_time.minute - 15)
+    recent_time = current_time - timedelta(minutes=15)
     
     result = await db.execute(
         select(func.count(Order.id)).where(
