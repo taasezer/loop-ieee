@@ -6,18 +6,23 @@ from typing import Dict
 from datetime import datetime
 import random
 
+import os
+from twilio.rest import Client
+
 class SMSService:
-    """SMS service using Twilio (mock implementation)"""
+    """SMS service using Twilio"""
     
     def __init__(self):
-        # In production:
-        # from twilio.rest import Client
-        # account_sid = os.environ['TWILIO_ACCOUNT_SID']
-        # auth_token = os.environ['TWILIO_AUTH_TOKEN']
-        # self.client = Client(account_sid, auth_token)
-        # self.from_number = os.environ['TWILIO_PHONE_NUMBER']
-        self.from_number = "+1234567890"
-        print("📱 SMS Service initialized (MOCK MODE)")
+        account_sid = os.environ.get('TWILIO_ACCOUNT_SID')
+        auth_token = os.environ.get('TWILIO_AUTH_TOKEN')
+        self.from_number = os.environ.get('TWILIO_PHONE_NUMBER', "+1234567890")
+        
+        if account_sid and auth_token:
+            self.client = Client(account_sid, auth_token)
+            print("📱 SMS Service initialized (PRODUCTION MODE)")
+        else:
+            self.client = None
+            print("📱 SMS Service initialized (MOCK MODE - Missing Credentials)")
     
     async def send_sms(
         self,
@@ -26,22 +31,35 @@ class SMSService:
     ) -> Dict:
         """Send SMS message"""
         
-        # MOCK: In production
-        # message = self.client.messages.create(
-        #     body=message,
-        #     from_=self.from_number,
-        #     to=to_number
-        # )
-        
-        print(f"📱 [MOCK] SMS sent to: {to_number}")
-        print(f"   Message: {message[:50]}...")
-        
-        return {
-            "success": True,
-            "message_sid": f"mock_sms_{datetime.utcnow().timestamp()}",
-            "to": to_number,
-            "mock": True
-        }
+        if self.client:
+            try:
+                message_obj = self.client.messages.create(
+                    body=message,
+                    from_=self.from_number,
+                    to=to_number
+                )
+                return {
+                    "success": True,
+                    "message_sid": message_obj.sid,
+                    "to": to_number,
+                    "mock": False
+                }
+            except Exception as e:
+                print(f"📱 Error sending SMS: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "mock": False
+                }
+        else:
+            print(f"📱 [MOCK] SMS sent to: {to_number}")
+            print(f"   Message: {message[:50]}...")
+            return {
+                "success": True,
+                "message_sid": f"mock_sms_{datetime.utcnow().timestamp()}",
+                "to": to_number,
+                "mock": True
+            }
     
     async def send_otp(
         self,

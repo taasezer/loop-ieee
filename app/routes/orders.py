@@ -3,11 +3,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List, Optional
 from app.database import get_db
-from app.models.orm import Order, User, OrderStatus
+from app.models.orm import Order, User, OrderStatus, UserRole
 from app.dependencies import get_current_user
 from app.services.pricing import calculate_order_price
 from pydantic import BaseModel
 from app.services.order_workflow import order_workflow_service
+from app.services.maps_service import maps_service
 
 router = APIRouter()
 
@@ -37,8 +38,17 @@ async def create_order(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    # Verify distance server-side
+    verified_distance = order_in.distance_km
+    distance_data = maps_service.calculate_distance_duration(
+        origin=(order_in.pickup_latitude, order_in.pickup_longitude),
+        destination=(order_in.delivery_latitude, order_in.delivery_longitude)
+    )
+    if distance_data:
+        verified_distance = distance_data['distance_km']
+        
     # Calculate price
-    price = await calculate_order_price(db, order_in.distance_km)
+    price = await calculate_order_price(db, verified_distance)
     
     new_order = Order(
         customer_id=current_user.id,
@@ -48,7 +58,7 @@ async def create_order(
         delivery_address=order_in.delivery_address,
         delivery_latitude=order_in.delivery_latitude,
         delivery_longitude=order_in.delivery_longitude,
-        distance_km=order_in.distance_km,
+        distance_km=verified_distance,
         price=price,
         status=OrderStatus.CREATED
     )
@@ -118,7 +128,7 @@ async def get_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
         
-    if order.customer_id != current_user.id: # Add admin check later
+    if order.customer_id != current_user.id and current_user.role not in [UserRole.ADMIN, UserRole.DISPATCHER]:
          raise HTTPException(status_code=403, detail="Not authorized")
 
     return OrderResponse(
@@ -169,7 +179,9 @@ async def update_order_status(
     db: AsyncSession = Depends(get_db)
 ):
     """Update order status (admin only)"""
-    # TODO: Add admin role check
+    if current_user.role not in [UserRole.ADMIN, UserRole.DISPATCHER]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
     result = await order_workflow_service.update_order_status(
         db=db,
         order_id=order_id,

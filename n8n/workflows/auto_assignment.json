@@ -49,7 +49,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Log the API request\nconst timestamp = new Date().toISOString();\nconst orderId = $input.first().json.order_id;\n\nconsole.log(`[${timestamp}] AI Recommendation requested for Order #${orderId}`);\n\nreturn {\n  json: {\n    timestamp,\n    order_id: orderId,\n    event: 'ai_recommendation_requested'\n  }\n};"
+        "jsCode": "// Log the API request\nconst timestamp = new Date().toISOString();\nconst orderId = $input.first().json.order_id;\n\nconsole.log(`[${timestamp}] AI Recommendation requested for Order #${orderId}`);\n\nreturn {\n  json: {\n    timestamp,\n    order_id: orderId,\n    event: 'ai_recommendation_requested'\n  }\n};"
       },
       "name": "Log Request",
       "type": "n8n-nodes-base.code",
@@ -127,7 +127,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Log successful assignment\nconsole.log(`[${timestamp}] Order #${data.order_id} assigned to ${data.assigned_courier.courier_name}`);\n\nreturn {\n  json: {\n    courier_name: data.assigned_courier.courier_name,\n    courier_phone: data.assigned_courier.phone || 'N/A',\n    order_id: data.order_id,\n    estimated_time: data.assigned_courier.estimated_time_minutes,\n    distance: data.assigned_courier.distance_km,\n    total_score: data.assigned_courier.total_score,\n    timestamp\n  }\n};"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Log successful assignment\nconsole.log(`[${timestamp}] Order #${data.order_id} assigned to ${data.assigned_courier.courier_name}`);\n\nreturn {\n  json: {\n    courier_name: data.assigned_courier.courier_name,\n    courier_phone: data.assigned_courier.phone || 'N/A',\n    order_id: data.order_id,\n    estimated_time: data.assigned_courier.estimated_time_minutes,\n    distance: data.assigned_courier.distance_km,\n    total_score: data.assigned_courier.total_score,\n    timestamp\n  }\n};"
       },
       "name": "Prepare Notification",
       "type": "n8n-nodes-base.code",
@@ -173,7 +173,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst score = data.recommended_courier?.total_score || 0;\n\nconsole.log(`[${timestamp}] Order #${data.order_id} requires manual assignment (score: ${score})`);\n\nreturn {\n  json: {\n    order_id: data.order_id,\n    score: score,\n    reason: 'Score too low for auto-assignment',\n    timestamp\n  }\n};"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst score = data.recommended_courier?.total_score || 0;\n\nconsole.log(`[${timestamp}] Order #${data.order_id} requires manual assignment (score: ${score})`);\n\nreturn {\n  json: {\n    order_id: data.order_id,\n    score: score,\n    reason: 'Score too low for auto-assignment',\n    timestamp\n  }\n};"
       },
       "name": "Log Manual Assignment",
       "type": "n8n-nodes-base.code",
@@ -194,7 +194,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] API Error:`, error);\n\nreturn {\n  json: {\n    error: true,\n    message: error.message || 'API request failed',\n    timestamp\n  }\n};"
+        "jsCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] API Error:`, error);\n\nreturn {\n  json: {\n    error: true,\n    message: error.message || 'API request failed',\n    timestamp\n  }\n};"
       },
       "name": "Handle Error",
       "type": "n8n-nodes-base.code",

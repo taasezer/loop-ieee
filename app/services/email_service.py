@@ -5,16 +5,21 @@ In production, install: pip install sendgrid
 from typing import Dict, Optional, List
 from datetime import datetime
 
+import os
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
+
 class EmailService:
-    """Email service using SendGrid (mock implementation)"""
+    """Email service using SendGrid"""
     
     def __init__(self):
-        # In production: 
-        # from sendgrid import SendGridAPIClient
-        # from sendgrid.helpers.mail import Mail
-        # self.sg = SendGridAPIClient(os.environ.get('SENDGRID_API_KEY'))
-        self.from_email = "noreply@loop-logistics.com"
-        print("📧 Email Service initialized (MOCK MODE)")
+        api_key = os.environ.get('SENDGRID_API_KEY')
+        self.sg = SendGridAPIClient(api_key) if api_key else None
+        self.from_email = os.environ.get('SENDGRID_FROM_EMAIL', "noreply@loop-logistics.com")
+        if self.sg:
+            print("📧 Email Service initialized (PRODUCTION MODE)")
+        else:
+            print("📧 Email Service initialized (MOCK MODE - Missing API Key)")
     
     async def send_email(
         self,
@@ -25,24 +30,37 @@ class EmailService:
     ) -> Dict:
         """Send email"""
         
-        # MOCK: In production
-        # message = Mail(
-        #     from_email=from_email or self.from_email,
-        #     to_emails=to_email,
-        #     subject=subject,
-        #     html_content=html_content
-        # )
-        # response = self.sg.send(message)
-        
-        print(f"📧 [MOCK] Email sent to: {to_email}")
-        print(f"   Subject: {subject}")
-        
-        return {
-            "success": True,
-            "message_id": f"mock_email_{datetime.utcnow().timestamp()}",
-            "to": to_email,
-            "mock": True
-        }
+        if self.sg:
+            try:
+                message = Mail(
+                    from_email=from_email or self.from_email,
+                    to_emails=to_email,
+                    subject=subject,
+                    html_content=html_content
+                )
+                response = self.sg.send(message)
+                return {
+                    "success": True,
+                    "message_id": response.headers.get('X-Message-Id', f"email_{datetime.utcnow().timestamp()}"),
+                    "to": to_email,
+                    "mock": False
+                }
+            except Exception as e:
+                print(f"📧 Error sending email: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "mock": False
+                }
+        else:
+            print(f"📧 [MOCK] Email sent to: {to_email}")
+            print(f"   Subject: {subject}")
+            return {
+                "success": True,
+                "message_id": f"mock_email_{datetime.utcnow().timestamp()}",
+                "to": to_email,
+                "mock": True
+            }
     
     async def send_order_confirmation(
         self,

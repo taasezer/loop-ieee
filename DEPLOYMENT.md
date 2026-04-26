@@ -1,108 +1,83 @@
-# Render Deployment Kontrol Listesi
+# LOOP Logistics Platform - Deployment Guide
 
-## Durum: HAZIR
+Bu proje, esneklik ve performans sağlamak amacıyla **İkili Dağıtım (Dual-Deployment)** stratejisi kullanacak şekilde yapılandırılmıştır.
 
-Sistem Render uzerinden deploy edilmeye tamamen hazir.
+1. **Staging / Test Ortamı:** Render (PaaS) üzerinden otomatik CI/CD.
+2. **Production / Canlı Ortam:** Oracle Cloud VPS üzerinden Docker Compose.
 
-## Mevcut Konfigurasyon
+---
 
-### 1. Render Blueprint (`render.yaml`)
-- Web servisi (FastAPI)
-- PostgreSQL veritabani
-- Redis cache
-- Otomatik environment variable yonetimi
+## Bölüm 1: STAGING (Render - Test Ortamı)
 
-### 2. Build Script (`build.sh`)
-- Dependency yukleme
-- PDF kutuphaneleri (reportlab, matplotlib)
-- Database migration
+Geliştirme sürecindeki kodlarınızı hızlıca test etmek için Render kullanılır. Projede bulunan `render.yaml` dosyası bu ortam için optimize edilmiştir.
 
-### 3. Dockerfile
-- Python 3.11
-- Production hazir konfigurasyon
+### Render Dağıtım Adımları
+1. **GitHub'a Push:**
+   ```bash
+   git add .
+   git commit -m "Test deploy"
+   git push origin main
+   ```
+2. **Render Dashboard:**
+   - [render.com](https://render.com) adresine gidin.
+   - **"New" -> "Blueprint"** seçeneğine tıklayın.
+   - GitHub deponuzu bağlayın. Render, `render.yaml` dosyasını otomatik algılayıp veritabanı, Redis ve FastAPI servisini kuracaktır.
+3. **Environment Variables:**
+   - Render Dashboard üzerinden ilgili servise (Web Service) tıklayın.
+   - `Environment` sekmesinden `.env.example` içerisindeki dış servis API anahtarlarını (SendGrid, Twilio vb.) ekleyin.
 
-## Deployment Adimlari
+> **Not:** Render'ın ücretsiz planında 15 dakika inaktivite sonrası servis uykuya geçer (Cold Start). Bu sadece test içindir. Ayrıca **n8n** Render üzerinde çalışmaz, kendi bilgisayarınızda çalıştırıp bağlamanız gerekir.
 
-### Adim 1: GitHub Repository
+---
+
+## Bölüm 2: PRODUCTION (Oracle Cloud - Canlı Ortam)
+
+Müşterileriniz için kesintisiz, sıfır gecikmeli ve n8n dahil tüm servisleri barındıran gerçek canlı ortam kurulumudur.
+
+### Adım 1: Oracle Cloud Sunucusu Oluşturma
+1. Oracle Cloud panelinden **"Create a VM instance"** deyin.
+2. Image olarak **Ubuntu 22.04**, Shape olarak **Ampere (ARM) A1 Compute** (4 OCPU, 24 GB RAM) seçin. (Ücretsiz katman).
+3. SSH anahtarlarınızı indirmeyi unutmayın.
+4. **VCN Security List (Güvenlik Duvarı):** Ağ ayarlarından Ingress Rules kısmına `TCP 8000` (FastAPI) ve `TCP 5678` (n8n) portları için `0.0.0.0/0` kuralını ekleyin.
+
+### Adım 2: Sunucuya Bağlanma ve Docker Kurulumu
+Bilgisayarınızın terminalinden sunucuya bağlanın:
 ```bash
-# Repoyu GitHub'a push edin
-git add .
-git commit -m "Production ready: Full testing and optimization complete"
-git push origin main
+ssh -i /path/to/your/private_key ubuntu@SUNUCU_IP_ADRESI
 ```
 
-### Adim 2: Render Dashboard
-1. [render.com](https://render.com) adresine gidin
-2. "New" -> "Blueprint" secin
-3. GitHub repository'nizi baglayin
-4. `render.yaml` otomatik algilanacak
-
-### Adim 3: Environment Variables
-Asagidaki API anahtarlarini Render dashboard'dan ekleyin:
-- `GOOGLE_MAPS_API_KEY`
-- `OPENWEATHER_API_KEY`
-- `EXCHANGE_RATE_API_KEY`
-
-### Adim 4: Deploy
-"Apply" butonuna tiklayin. Render otomatik olarak:
-- PostgreSQL database olusturur
-- Redis instance baslatir
-- Backend'i deploy eder
-- Database migration'lari calistirir
-
-## Deployment Sonrasi Kontrol
-
-### Health Check
+Sunucuya Docker ve Git kurun:
 ```bash
-curl https://your-app.onrender.com/health
+sudo apt update
+sudo apt install -y docker.io docker-compose git
+sudo systemctl enable --now docker
+sudo usermod -aG docker ubuntu
 ```
+*(Grup ayarının geçerli olması için SSH'dan çıkıp tekrar girmeniz gerekebilir)*
 
-### API Documentation
-```
-https://your-app.onrender.com/docs
-```
-
-### Test Endpoints
+### Adım 3: Projeyi Klonlama ve Ayarlar
 ```bash
-# Root endpoint
-curl https://your-app.onrender.com/
-
-# Analytics
-curl https://your-app.onrender.com/api/analytics/dashboard
+git clone https://github.com/kullaniciadi/loop-ieee.git
+cd loop-ieee
 ```
 
-## Onemli Notlar
+`.env` dosyanızı oluşturun:
+```bash
+cp .env.example .env
+nano .env
+```
+Buradaki tüm API anahtarlarınızı (`SENDGRID_API_KEY`, `TWILIO`, vb.) dikkatlice doldurun. Çıkmak için `CTRL+X`, `Y`, `Enter`.
 
-1. **Ucretsiz Plan Sinirlari**
-   - 15 dakika inaktiviteden sonra sleep modu
-   - Aylik 750 saat calisma
-   - Shared resources
+### Adım 4: Sistemi Başlatma
+Tüm servisleri (Backend, Postgres, Redis ve n8n) tek komutla canlıya alın:
+```bash
+docker-compose up -d --build
+```
 
-2. **Production Onerileri**
-   - Paid plan'a gecis onerilir (7$/ay)
-   - Database backup'lari etkinlestirin
-   - Monitoring ekleyin
+### Adım 5: Doğrulama ve Kullanım
+- **API (FastAPI):** `http://SUNUCU_IP_ADRESI:8000/docs`
+- **Otomasyon (n8n):** `http://SUNUCU_IP_ADRESI:5678`
 
-3. **CORS Ayarlari**
-   - Frontend URL'ini `CORS_ORIGINS` environment variable'ina ekleyin
+Her iki servise de tarayıcı üzerinden erişebilirsiniz. `docker-compose.yml` dosyamız, Veritabanı (5432) ve Redis (6379) portlarını güvenlik sebebiyle dış dünyaya kapatmıştır.
 
-## Sorun Giderme
-
-### Build Hatasi
-- `build.sh` dosyasinin calistirilabilir oldugunu kontrol edin
-- Dependency cakismalarini inceleyin
-
-### Database Baglanti Hatasi
-- `DATABASE_URL` environment variable'inin dogru ayarlandigini dogrulayin
-- Migration'larin calistigini kontrol edin
-
-### Redis Baglanti Hatasi
-- Redis service'inin aktif oldugunu dogrulayin
-- `REDIS_URL` environment variable'ini kontrol edin
-
-## Destek
-
-Deployment sirasinda sorun yasarsaniz:
-1. Render logs'lari inceleyin
-2. Environment variables'i kontrol edin
-3. Build script'i gozden gecirin
+> **Önemli:** Production ortamında Domain bağlayıp SSL sertifikası (HTTPS) almak için Nginx Reverse Proxy kullanılması önerilir. Kurulum tamamlandıktan sonra Nginx ve Certbot kurulumu yapılabilir.

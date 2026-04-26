@@ -20,6 +20,18 @@ class Settings(BaseSettings):
     EXCHANGE_RATE_API_KEY: str = ""
     N8N_WEBHOOK_URL: str = ""
 
+    # Notification Services
+    TWILIO_ACCOUNT_SID: str = ""
+    TWILIO_AUTH_TOKEN: str = ""
+    TWILIO_PHONE_NUMBER: str = ""
+    SENDGRID_API_KEY: str = ""
+    SENDGRID_FROM_EMAIL: str = ""
+    FIREBASE_CREDENTIALS_PATH: str = ""
+    
+    # Loop API
+    LOOP_API_TOKEN: str = ""
+    LOOP_API_URL: str = ""
+
     # Server
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000

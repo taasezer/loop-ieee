@@ -35,6 +35,22 @@ services:
         sync: false
       - key: EXCHANGE_RATE_API_KEY
         sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SENDGRID_FROM_EMAIL
+        sync: false
+      - key: N8N_WEBHOOK_URL
+        sync: false
+      - key: LOOP_API_TOKEN
+        sync: false
+      - key: LOOP_API_URL
+        sync: false
 
   # PostgreSQL Database
   - type: postgres

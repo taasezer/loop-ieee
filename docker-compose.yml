@@ -4,22 +4,39 @@ services:
   backend:
     build: .
     container_name: loop_backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     volumes:
       - .:/app
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/loop_logistics
       - REDIS_URL=redis://redis:6379/0
-      - SECRET_KEY=dev_secret_key_change_in_prod
-      - ALGORITHM=HS256
-      - ACCESS_TOKEN_EXPIRE_MINUTES=30
     depends_on:
       - db
       - redis
     networks:
       - loop_network
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: loop_n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=${N8N_WEBHOOK_URL:-http://localhost:5678/}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - loop_network
+    restart: unless-stopped
 
   db:
     image: postgres:15-alpine
@@ -28,20 +45,20 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=loop_logistics
-    ports:
-      - "5432:5432"
+    # Removed ports directive to secure DB from outside access
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - loop_network
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: loop_redis
-    ports:
-      - "6379:6379"
+    # Removed ports directive to secure Redis from outside access
     networks:
       - loop_network
+    restart: unless-stopped
 
 networks:
   loop_network:
@@ -49,3 +66,4 @@ networks:
 
 volumes:
   postgres_data:
+  n8n_data:

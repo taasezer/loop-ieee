@@ -57,7 +57,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierCount = data.total_active_couriers || 0;\n\nconsole.log(`[${timestamp}] Weather check: ${courierCount} active couriers`);\n\nif (courierCount === 0) {\n  console.log('No active couriers, skipping weather checks');\n  return [];\n}\n\n// Extract couriers array\nreturn data.couriers.map(courier => ({\n  json: courier\n}));"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierCount = data.total_active_couriers || 0;\n\nconsole.log(`[${timestamp}] Weather check: ${courierCount} active couriers`);\n\nif (courierCount === 0) {\n  console.log('No active couriers, skipping weather checks');\n  return [];\n}\n\n// Extract couriers array\nreturn data.couriers.map(courier => ({\n  json: courier\n}));"
       },
       "name": "Extract Couriers",
       "type": "n8n-nodes-base.code",
@@ -99,7 +99,12 @@
         },
         "jsonParameters": true,
         "options": {
-          "timeout": 10000
+          "timeout": 10000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
         },
         "bodyParametersJson": "={\"latitude\": {{$json.latitude}}, \"longitude\": {{$json.longitude}}, \"courier_id\": {{$json.courier_id}}}"
       },
@@ -153,7 +158,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierId = data.courier_id;\n\n// Check if we recently sent an alert to this courier (throttling)\nconst recentAlerts = $workflow.staticData.recentAlerts || {};\nconst lastAlertTime = recentAlerts[courierId];\nconst throttleDurationMs = 60 * 60 * 1000; // 1 hour\n\nif (lastAlertTime && (Date.now() - lastAlertTime < throttleDurationMs)) {\n  console.log(`[${timestamp}] Alert throttled for courier #${courierId} (last alert: ${new Date(lastAlertTime).toISOString()})`);\n  return [];\n}\n\n// Update last alert time\nrecentAlerts[courierId] = Date.now();\n$workflow.staticData.recentAlerts = recentAlerts;\n\n// Get courier info from previous node\nconst previousData = $('Split Couriers').first().json;\n\nconst severityEmoji = {\n  'critical': '🚨',\n  'high': '⚠️',\n  'moderate': '⚡',\n  'low': '💡',\n  'none': '✅'\n};\n\nconst emoji = severityEmoji[data.severity] || '⚠️';\n\nconsole.log(`[${timestamp}] Sending ${data.severity} weather alert to courier #${courierId}`);\n\nreturn {\n  json: {\n    courier_id: courierId,\n    courier_name: previousData.courier_name,\n    phone: previousData.phone,\n    severity: data.severity,\n    severity_emoji: emoji,\n    condition: data.condition,\n    description: data.description,\n    recommendation: data.recommendation,\n    impact_score: data.impact_score,\n    warnings: data.warnings || [],\n    location: data.location,\n    temperature: data.weather_conditions?.temperature,\n    wind_speed: data.weather_conditions?.wind_speed,\n    visibility: data.weather_conditions?.visibility,\n    timestamp\n  }\n};"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\nconst courierId = data.courier_id;\n\n// Check if we recently sent an alert to this courier (throttling)\nconst recentAlerts = $workflow.staticData.recentAlerts || {};\nconst lastAlertTime = recentAlerts[courierId];\nconst throttleDurationMs = 60 * 60 * 1000; // 1 hour\n\nif (lastAlertTime && (Date.now() - lastAlertTime < throttleDurationMs)) {\n  console.log(`[${timestamp}] Alert throttled for courier #${courierId} (last alert: ${new Date(lastAlertTime).toISOString()})`);\n  return [];\n}\n\n// Update last alert time\nrecentAlerts[courierId] = Date.now();\n$workflow.staticData.recentAlerts = recentAlerts;\n\n// Get courier info from previous node\nconst previousData = $('Split Couriers').first().json;\n\nconst severityEmoji = {\n  'critical': '🚨',\n  'high': '⚠️',\n  'moderate': '⚡',\n  'low': '💡',\n  'none': '✅'\n};\n\nconst emoji = severityEmoji[data.severity] || '⚠️';\n\nconsole.log(`[${timestamp}] Sending ${data.severity} weather alert to courier #${courierId}`);\n\nreturn {\n  json: {\n    courier_id: courierId,\n    courier_name: previousData.courier_name,\n    phone: previousData.phone,\n    severity: data.severity,\n    severity_emoji: emoji,\n    condition: data.condition,\n    description: data.description,\n    recommendation: data.recommendation,\n    impact_score: data.impact_score,\n    warnings: data.warnings || [],\n    location: data.location,\n    temperature: data.weather_conditions?.temperature,\n    wind_speed: data.weather_conditions?.wind_speed,\n    visibility: data.weather_conditions?.visibility,\n    timestamp\n  }\n};"
       },
       "name": "Prepare Alert (Throttled)",
       "type": "n8n-nodes-base.code",
@@ -180,6 +185,14 @@
           ]
         },
         "jsonParameters": true,
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "enabled": true,
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        },
         "bodyParametersJson": "={\"type\": \"weather_alert\", \"title\": \"{{$json.severity_emoji}} Weather Alert - {{$json.severity.toUpperCase()}}\", \"message\": \"Location: {{$json.location}}\\nCondition: {{$json.description}}\\n\\n{{$json.recommendation}}\\n\\nTemp: {{$json.temperature}}°C | Wind: {{$json.wind_speed}} km/h | Visibility: {{$json.visibility}} km\", \"courier_id\": {{$json.courier_id}}, \"severity\": \"{{$json.severity}}\"}"
       },
       "name": "Send Push Notification",
@@ -194,7 +207,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Build SMS message\nconst message = `${data.severity_emoji} LOOP Weather Alert\\n\\nCourier: ${data.courier_name}\\nLocation: ${data.location}\\nCondition: ${data.description}\\n\\n${data.recommendation}\\n\\n${data.warnings.join('\\n') || 'No additional warnings'}\\n\\nStay safe!`;\n\nconsole.log(`[${timestamp}] SMS Alert prepared for ${data.phone}`);\n\nreturn {\n  json: {\n    phone: data.phone,\n    message,\n    courier_id: data.courier_id,\n    severity: data.severity\n  }\n};"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Build SMS message\nconst message = `${data.severity_emoji} LOOP Weather Alert\\n\\nCourier: ${data.courier_name}\\nLocation: ${data.location}\\nCondition: ${data.description}\\n\\n${data.recommendation}\\n\\n${data.warnings.join('\\n') || 'No additional warnings'}\\n\\nStay safe!`;\n\nconsole.log(`[${timestamp}] SMS Alert prepared for ${data.phone}`);\n\nreturn {\n  json: {\n    phone: data.phone,\n    message,\n    courier_id: data.courier_id,\n    severity: data.severity\n  }\n};"
       },
       "name": "Prepare SMS",
       "type": "n8n-nodes-base.code",
@@ -207,7 +220,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// In production, integrate with Twilio or similar SMS service\nconst data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] SMS Alert sent (simulated) to ${data.phone}`);\nconsole.log(`Message: ${data.message}`);\n\n// PRODUCTION CODE (uncomment when ready):\n// const twilioUrl = 'https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json';\n// return await $http.post(twilioUrl, {\n//   To: data.phone,\n//   From: process.env.TWILIO_PHONE,\n//   Body: data.message\n// });\n\nreturn {\n  json: {\n    success: true,\n    phone: data.phone,\n    severity: data.severity,\n    sent_at: timestamp\n  }\n};"
+        "jsCode": "// In production, integrate with Twilio or similar SMS service\nconst data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] SMS Alert sent (simulated) to ${data.phone}`);\nconsole.log(`Message: ${data.message}`);\n\n// PRODUCTION CODE (uncomment when ready):\n// const twilioUrl = 'https://api.twilio.com/2010-04-01/Accounts/YOUR_ACCOUNT_SID/Messages.json';\n// return await $http.post(twilioUrl, {\n//   To: data.phone,\n//   From: process.env.TWILIO_PHONE,\n//   Body: data.message\n// });\n\nreturn {\n  json: {\n    success: true,\n    phone: data.phone,\n    severity: data.severity,\n    sent_at: timestamp\n  }\n};"
       },
       "name": "Send SMS (Simulated)",
       "type": "n8n-nodes-base.code",
@@ -220,7 +233,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Check if many alerts were triggered (potential system-wide issue)\nconst allAlerts = $workflow.staticData.alertCounts || {};\nconst currentHour = new Date().getHours();\n\nif (!allAlerts[currentHour]) {\n  allAlerts[currentHour] = 0;\n}\n\nallAlerts[currentHour]++;\n$workflow.staticData.alertCounts = allAlerts;\n\nconst threshold = 5; // Alert admin if more than 5 couriers affected\n\nif (allAlerts[currentHour] >= threshold) {\n  console.log(`ADMIN ALERT: ${allAlerts[currentHour]} weather alerts sent this hour`);\n  \n  return {\n    json: {\n      alert_admin: true,\n      alert_count: allAlerts[currentHour],\n      hour: currentHour,\n      message: `Multiple weather alerts triggered (${allAlerts[currentHour]} this hour). System-wide weather issue possible.`\n    }\n  };\n}\n\nreturn [];"
+        "jsCode": "// Check if many alerts were triggered (potential system-wide issue)\nconst allAlerts = $workflow.staticData.alertCounts || {};\nconst currentHour = new Date().getHours();\n\nif (!allAlerts[currentHour]) {\n  allAlerts[currentHour] = 0;\n}\n\nallAlerts[currentHour]++;\n$workflow.staticData.alertCounts = allAlerts;\n\nconst threshold = 5; // Alert admin if more than 5 couriers affected\n\nif (allAlerts[currentHour] >= threshold) {\n  console.log(`ADMIN ALERT: ${allAlerts[currentHour]} weather alerts sent this hour`);\n  \n  return {\n    json: {\n      alert_admin: true,\n      alert_count: allAlerts[currentHour],\n      hour: currentHour,\n      message: `Multiple weather alerts triggered (${allAlerts[currentHour]} this hour). System-wide weather issue possible.`\n    }\n  };\n}\n\nreturn [];"
       },
       "name": "Check Admin Notification",
       "type": "n8n-nodes-base.code",
@@ -233,7 +246,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] No alert needed - good weather conditions`);\n\nreturn {\n  json: {\n    skipped: true,\n    reason: 'Weather conditions acceptable',\n    timestamp\n  }\n};"
+        "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] No alert needed - good weather conditions`);\n\nreturn {\n  json: {\n    skipped: true,\n    reason: 'Weather conditions acceptable',\n    timestamp\n  }\n};"
       },
       "name": "Skip Alert",
       "type": "n8n-nodes-base.code",
@@ -246,7 +259,7 @@
     },
     {
       "parameters": {
-        "functionCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] Weather check error:`, error.message || error);\n\nreturn {\n  json: {\n    error: true,\n    message: error.message || 'API request failed',\n    timestamp\n  }\n};"
+        "jsCode": "const error = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.error(`[${timestamp}] Weather check error:`, error.message || error);\n\nreturn {\n  json: {\n    error: true,\n    message: error.message || 'API request failed',\n    timestamp\n  }\n};"
       },
       "name": "Handle Error",
       "type": "n8n-nodes-base.code",

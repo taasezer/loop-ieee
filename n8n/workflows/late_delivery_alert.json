@@ -46,7 +46,12 @@
                     ]
                 },
                 "options": {
-                    "timeout": 15000
+                    "timeout": 15000,
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 1000
+                    }
                 }
             },
             "name": "Get Active Orders",
@@ -60,7 +65,7 @@
         },
         {
             "parameters": {
-                "functionCode": "const orders = $input.first().json.orders || [];\nconst now = Date.now();\nconst lateOrders = [];\n\nfor (const order of orders) {\n  // Check if order has estimated delivery time\n  if (!order.estimated_delivery_time) continue;\n  \n  const estimatedTime = new Date(order.estimated_delivery_time).getTime();\n  const minutesLate = Math.floor((now - estimatedTime) / (1000 * 60));\n  \n  // Consider late if more than 5 minutes past estimated time\n  if (minutesLate > 5) {\n    lateOrders.push({\n      ...order,\n      minutes_late: minutesLate\n    });\n  }\n}\n\nconst timestamp = new Date().toISOString();\nconsole.log(`[${timestamp}] Found ${lateOrders.length} late deliveries`);\n\nif (lateOrders.length === 0) {\n  return [];\n}\n\nreturn lateOrders.map(order => ({ json: order }));"
+                "jsCode": "const orders = $input.first().json.orders || [];\nconst now = Date.now();\nconst lateOrders = [];\n\nfor (const order of orders) {\n  // Check if order has estimated delivery time\n  if (!order.estimated_delivery_time) continue;\n  \n  const estimatedTime = new Date(order.estimated_delivery_time).getTime();\n  const minutesLate = Math.floor((now - estimatedTime) / (1000 * 60));\n  \n  // Consider late if more than 5 minutes past estimated time\n  if (minutesLate > 5) {\n    lateOrders.push({\n      ...order,\n      minutes_late: minutesLate\n    });\n  }\n}\n\nconst timestamp = new Date().toISOString();\nconsole.log(`[${timestamp}] Found ${lateOrders.length} late deliveries`);\n\nif (lateOrders.length === 0) {\n  return [];\n}\n\nreturn lateOrders.map(order => ({ json: order }));"
             },
             "name": "Filter Late Orders",
             "type": "n8n-nodes-base.code",
@@ -87,7 +92,7 @@
         },
         {
             "parameters": {
-                "functionCode": "const order = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Check if we already notified about this order being late\nconst notifiedOrders = $workflow.staticData.notifiedLateOrders || {};\n\nif (notifiedOrders[order.id]) {\n  console.log(`[${timestamp}] Already notified about late order #${order.id}`);\n  return [];\n}\n\n// Mark as notified\nnotifiedOrders[order.id] = timestamp;\n$workflow.staticData.notifiedLateOrders = notifiedOrders;\n\n// Calculate new ETA (add 15 minutes to current time)\nconst newEta = new Date(Date.now() + 15 * 60 * 1000);\nconst newEtaStr = newEta.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });\n\n// Determine compensation based on how late\nlet compensation = null;\nif (order.minutes_late > 30) {\n  compensation = {\n    type: 'discount_code',\n    value: 20,\n    code: `LATE${order.id}20`\n  };\n} else if (order.minutes_late > 15) {\n  compensation = {\n    type: 'discount_code',\n    value: 10,\n    code: `LATE${order.id}10`\n  };\n}\n\nconsole.log(`[${timestamp}] Processing late order #${order.id} (${order.minutes_late} min late)`);\n\nreturn {\n  json: {\n    order_id: order.id,\n    customer_id: order.customer_id,\n    courier_id: order.courier_id,\n    minutes_late: order.minutes_late,\n    new_eta: newEtaStr,\n    compensation: compensation,\n    pickup_address: order.pickup_address,\n    delivery_address: order.delivery_address\n  }\n};"
+                "jsCode": "const order = $input.first().json;\nconst timestamp = new Date().toISOString();\n\n// Check if we already notified about this order being late\nconst notifiedOrders = $workflow.staticData.notifiedLateOrders || {};\n\nif (notifiedOrders[order.id]) {\n  console.log(`[${timestamp}] Already notified about late order #${order.id}`);\n  return [];\n}\n\n// Mark as notified\nnotifiedOrders[order.id] = timestamp;\n$workflow.staticData.notifiedLateOrders = notifiedOrders;\n\n// Calculate new ETA (add 15 minutes to current time)\nconst newEta = new Date(Date.now() + 15 * 60 * 1000);\nconst newEtaStr = newEta.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });\n\n// Determine compensation based on how late\nlet compensation = null;\nif (order.minutes_late > 30) {\n  compensation = {\n    type: 'discount_code',\n    value: 20,\n    code: `LATE${order.id}20`\n  };\n} else if (order.minutes_late > 15) {\n  compensation = {\n    type: 'discount_code',\n    value: 10,\n    code: `LATE${order.id}10`\n  };\n}\n\nconsole.log(`[${timestamp}] Processing late order #${order.id} (${order.minutes_late} min late)`);\n\nreturn {\n  json: {\n    order_id: order.id,\n    customer_id: order.customer_id,\n    courier_id: order.courier_id,\n    minutes_late: order.minutes_late,\n    new_eta: newEtaStr,\n    compensation: compensation,\n    pickup_address: order.pickup_address,\n    delivery_address: order.delivery_address\n  }\n};"
             },
             "name": "Check If Already Notified",
             "type": "n8n-nodes-base.code",
@@ -114,6 +119,14 @@
                     ]
                 },
                 "jsonParameters": true,
+                "options": {
+                    "timeout": 15000,
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 1000
+                    }
+                },
                 "bodyParametersJson": "={\"type\": \"late_delivery_customer\", \"user_id\": {{$json.customer_id}}, \"title\": \"⏰ Delivery Update\", \"message\": \"We apologize for the delay. Your order is running {{$json.minutes_late}} minutes late.\\n\\nNew estimated arrival: {{$json.new_eta}}\\n\\nWe're very sorry for the inconvenience!\" + ($json.compensation ? \"\\n\\n🎁 As an apology, here's {{$json.compensation.value}}% off your next order: {{$json.compensation.code}}\" : \"\"), \"order_id\": {{$json.order_id}}}"
             },
             "name": "Notify Customer",
@@ -142,6 +155,14 @@
                     ]
                 },
                 "jsonParameters": true,
+                "options": {
+                    "timeout": 15000,
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 1000
+                    }
+                },
                 "bodyParametersJson": "={\"type\": \"late_delivery_courier\", \"courier_id\": {{$json.courier_id}}, \"title\": \"⚠️ Delivery Running Late\", \"message\": \"Order #{{$json.order_id}} is {{$json.minutes_late}} minutes late.\\n\\nPlease prioritize this delivery and update customer if needed.\", \"order_id\": {{$json.order_id}}}"
             },
             "name": "Notify Courier",
@@ -170,6 +191,14 @@
                     ]
                 },
                 "jsonParameters": true,
+                "options": {
+                    "timeout": 15000,
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 1000
+                    }
+                },
                 "bodyParametersJson": "={\"type\": \"late_delivery_admin\", \"title\": \"🚨 Late Delivery Alert\", \"message\": \"Order #{{$json.order_id}} is {{$json.minutes_late}} minutes late.\\n\\nFrom: {{$json.pickup_address}}\\nTo: {{$json.delivery_address}}\" + ($json.compensation ? \"\\n\\nCompensation issued: {{$json.compensation.value}}% discount ({{$json.compensation.code}})\" : \"\"), \"order_id\": {{$json.order_id}}}"
             },
             "name": "Notify Admin",
@@ -198,6 +227,14 @@
                     ]
                 },
                 "jsonParameters": true,
+                "options": {
+                    "timeout": 15000,
+                    "retry": {
+                        "enabled": true,
+                        "maxTries": 3,
+                        "waitBetweenTries": 1000
+                    }
+                },
                 "bodyParametersJson": "={\"code\": \"{{$json.compensation.code}}\", \"discount_percentage\": {{$json.compensation.value}}, \"max_uses\": 1, \"user_id\": {{$json.customer_id}}, \"expires_days\": 30, \"reason\": \"Late delivery compensation for order #{{$json.order_id}}\"}"
             },
             "name": "Create Promo Code",
@@ -242,7 +279,7 @@
         },
         {
             "parameters": {
-                "functionCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] ✅ Late delivery alert sent for order #${data.order_id}`);\nif (data.compensation) {\n  console.log(`  Compensation: ${data.compensation.value}% discount (${data.compensation.code})`);\n}\n\nreturn { json: data };"
+                "jsCode": "const data = $input.first().json;\nconst timestamp = new Date().toISOString();\n\nconsole.log(`[${timestamp}] ✅ Late delivery alert sent for order #${data.order_id}`);\nif (data.compensation) {\n  console.log(`  Compensation: ${data.compensation.value}% discount (${data.compensation.code})`);\n}\n\nreturn { json: data };"
             },
             "name": "Log Alert Sent",
             "type": "n8n-nodes-base.code",
