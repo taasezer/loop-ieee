@@ -62,6 +62,18 @@ async def seed_data():
         )
         db.add(customer2)
         
+        # Supplier users
+        supplier1 = User(
+            email="tedarikci@loop.com",
+            phone_number="+905551234572",
+            full_name="Tedarikçi Test",
+            hashed_password=pwd_context.hash("admin123"),
+            role=UserRole.SUPPLIER,
+            company_name="Test Tedarikçi A.Ş.",
+            supplier_code="SUP-TEST01"
+        )
+        db.add(supplier1)
+        
         # Courier users
         courier_user1 = User(
             email="courier1@loop.com",
@@ -85,10 +97,11 @@ async def seed_data():
         await db.refresh(admin)
         await db.refresh(customer1)
         await db.refresh(customer2)
+        await db.refresh(supplier1)
         await db.refresh(courier_user1)
         await db.refresh(courier_user2)
         
-        print(f"✅ Created 5 users (1 admin, 2 customers, 2 couriers)")
+        print(f"✅ Created 6 users (1 admin, 2 customers, 1 supplier, 2 couriers)")
         
         # 2. Create courier profiles
         print("\n🚗 Creating courier profiles...")

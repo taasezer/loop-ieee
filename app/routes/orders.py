@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.database import get_db
 from app.models.orm import Order, User, OrderStatus, UserRole
@@ -9,6 +10,15 @@ from app.services.pricing import calculate_order_price
 from pydantic import BaseModel
 from app.services.order_workflow import order_workflow_service
 from app.services.maps_service import maps_service
+from app.middleware.rate_limit import limiter
+from fastapi import Request
+import secrets
+import string
+import html
+
+def generate_tracking_code(length=8):
+    chars = string.ascii_uppercase + string.digits
+    return "LOOP-" + "".join(secrets.choice(chars) for _ in range(length))
 
 router = APIRouter()
 
@@ -20,6 +30,8 @@ class OrderCreate(BaseModel):
     delivery_latitude: float
     delivery_longitude: float
     distance_km: float # In a real app, this would be calculated server-side via OSRM
+    customer_note: Optional[str] = None
+    supplier_code: Optional[str] = None
 
 class OrderResponse(BaseModel):
     id: int
@@ -27,6 +39,9 @@ class OrderResponse(BaseModel):
     price: float
     pickup_address: str
     delivery_address: str
+    tracking_code: Optional[str] = None
+    customer_note: Optional[str] = None
+    supplier_company: Optional[str] = None
     created_at: str
 
     class Config:
@@ -50,6 +65,16 @@ async def create_order(
     # Calculate price
     price = await calculate_order_price(db, verified_distance)
     
+    supplier_id = None
+    supplier_company = None
+    if order_in.supplier_code:
+        supplier_result = await db.execute(select(User).where(User.supplier_code == order_in.supplier_code.upper()))
+        supplier = supplier_result.scalar_one_or_none()
+        if not supplier:
+            raise HTTPException(status_code=404, detail="Tedarikçi kodu geçersiz.")
+        supplier_id = supplier.id
+        supplier_company = supplier.company_name
+    
     new_order = Order(
         customer_id=current_user.id,
         pickup_address=order_in.pickup_address,
@@ -60,6 +85,9 @@ async def create_order(
         delivery_longitude=order_in.delivery_longitude,
         distance_km=verified_distance,
         price=price,
+        tracking_code=generate_tracking_code(),
+        customer_note=html.escape(order_in.customer_note) if order_in.customer_note else None,
+        supplier_id=supplier_id,
         status=OrderStatus.CREATED
     )
     
@@ -73,6 +101,9 @@ async def create_order(
         price=new_order.price,
         pickup_address=new_order.pickup_address,
         delivery_address=new_order.delivery_address,
+        tracking_code=new_order.tracking_code,
+        customer_note=new_order.customer_note,
+        supplier_company=supplier_company,
         created_at=str(new_order.created_at)
     )
 
@@ -81,7 +112,10 @@ async def get_orders(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Order).where(Order.customer_id == current_user.id))
+    if current_user.role == UserRole.SUPPLIER:
+        result = await db.execute(select(Order).options(selectinload(Order.supplier)).where(Order.supplier_id == current_user.id))
+    else:
+        result = await db.execute(select(Order).options(selectinload(Order.supplier)).where(Order.customer_id == current_user.id))
     orders = result.scalars().all()
     return [
         OrderResponse(
@@ -90,6 +124,8 @@ async def get_orders(
             price=o.price,
             pickup_address=o.pickup_address,
             delivery_address=o.delivery_address,
+            tracking_code=o.tracking_code,
+            supplier_company=o.supplier.company_name if o.supplier else None,
             created_at=str(o.created_at)
         ) for o in orders
     ]
@@ -100,10 +136,18 @@ async def get_active_orders(
     db: AsyncSession = Depends(get_db)
 ):
     """Get active (non-completed) orders for current user"""
-    orders = await order_workflow_service.get_active_orders(
-        db=db,
-        user_id=current_user.id
-    )
+    if current_user.role == UserRole.SUPPLIER:
+        query = select(Order).options(selectinload(Order.supplier)).where(
+            Order.status.not_in([OrderStatus.DELIVERED, OrderStatus.CANCELLED]),
+            Order.supplier_id == current_user.id
+        )
+        result = await db.execute(query.order_by(Order.created_at.desc()))
+        orders = result.scalars().all()
+    else:
+        orders = await order_workflow_service.get_active_orders(
+            db=db,
+            user_id=current_user.id
+        )
     
     return [
         OrderResponse(
@@ -112,6 +156,8 @@ async def get_active_orders(
             price=o.price,
             pickup_address=o.pickup_address,
             delivery_address=o.delivery_address,
+            tracking_code=o.tracking_code,
+            supplier_company=o.supplier.company_name if o.supplier else None,
             created_at=str(o.created_at)
         ) for o in orders
     ]
@@ -122,7 +168,7 @@ async def get_order(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(Order).where(Order.id == order_id))
+    result = await db.execute(select(Order).options(selectinload(Order.supplier)).where(Order.id == order_id))
     order = result.scalar_one_or_none()
     
     if not order:
@@ -137,7 +183,44 @@ async def get_order(
         price=order.price,
         pickup_address=order.pickup_address,
         delivery_address=order.delivery_address,
+        tracking_code=order.tracking_code,
+        customer_note=order.customer_note,
         created_at=str(order.created_at)
+    )
+
+class PublicTrackingResponse(BaseModel):
+    tracking_code: str
+    status: str
+    delivery_area: str
+    courier_name: Optional[str] = None
+    customer_note: Optional[str] = None
+    
+@router.get("/track/{code}", response_model=PublicTrackingResponse)
+@limiter.limit("10/minute")
+async def track_order_public(code: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Public endpoint to track an order without authentication. Masks PII."""
+    result = await db.execute(select(Order).where(Order.tracking_code == code))
+    order = result.scalar_one_or_none()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Geçersiz takip kodu")
+        
+    # Masking the exact delivery address to just the general area for security
+    masked_address = order.delivery_address.split(',')[0] + " (Gizli Adres)" if order.delivery_address else "Bilinmiyor"
+    
+    courier_name = None
+    if order.courier_id:
+        result_courier = await db.execute(select(User).where(User.id == order.courier_id)) # Not optimal, but gets user
+        courier_user = result_courier.scalar_one_or_none()
+        if courier_user:
+            courier_name = courier_user.full_name.split()[0] + " ***"
+
+    return PublicTrackingResponse(
+        tracking_code=order.tracking_code,
+        status=order.status,
+        delivery_area=masked_address,
+        courier_name=courier_name,
+        customer_note=order.customer_note
     )
 
 @router.post("/{order_id}/cancel")

@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 from app.database import get_db
 from app.models.orm import User, UserRole
 from app.auth.security import verify_password, get_password_hash, create_access_token, create_refresh_token, oauth2_scheme
+from app.dependencies import get_current_active_user
 from pydantic import BaseModel, EmailStr
 
 router = APIRouter()
@@ -15,6 +16,7 @@ class UserCreate(BaseModel):
     full_name: str
     phone_number: str
     role: UserRole = UserRole.CUSTOMER
+    company_name: str | None = None
 
 class UserResponse(BaseModel):
     id: int
@@ -22,6 +24,8 @@ class UserResponse(BaseModel):
     full_name: str
     role: str
     is_active: bool
+    supplier_code: str | None = None
+    company_name: str | None = None
 
     class Config:
         from_attributes = True
@@ -43,12 +47,22 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Phone number already registered")
 
     hashed_password = get_password_hash(user.password)
+    import secrets
+    import string
+    
+    supplier_code = None
+    if user.role == UserRole.SUPPLIER:
+        chars = string.ascii_uppercase + string.digits
+        supplier_code = "SUP-" + "".join(secrets.choice(chars) for _ in range(6))
+
     new_user = User(
         email=user.email,
         hashed_password=hashed_password,
         full_name=user.full_name,
         phone_number=user.phone_number,
-        role=user.role
+        role=user.role,
+        company_name=user.company_name,
+        supplier_code=supplier_code
     )
     
     db.add(new_user)
@@ -76,3 +90,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSessi
         "refresh_token": refresh_token,
         "token_type": "bearer"
     }
+@router.get("/me", response_model=UserResponse)
+async def read_users_me(current_user: User = Depends(get_current_active_user)):
+    return current_user

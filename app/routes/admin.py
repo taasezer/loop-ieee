@@ -28,6 +28,8 @@ class OrderDetailResponse(BaseModel):
     delivery_address: str
     price: float
     distance_km: float
+    tracking_code: Optional[str] = None
+    customer_note: Optional[str] = None
     created_at: str
     
     class Config:
@@ -81,6 +83,8 @@ async def get_all_orders(
             delivery_address=o.delivery_address,
             price=o.price,
             distance_km=o.distance_km or 0.0,
+            tracking_code=o.tracking_code,
+            customer_note=o.customer_note,
             created_at=str(o.created_at)
         ) for o in orders
     ]
@@ -229,11 +233,19 @@ async def update_pricing_rule(
     rule = result.scalar_one_or_none()
     
     if not rule:
-        raise HTTPException(status_code=404, detail="Pricing rule not found")
-    
-    rule.base_price = base_price
-    rule.price_per_km = price_per_km
-    rule.surge_multiplier = surge_multiplier
+        # Create it if it doesn't exist
+        rule = PricingRule(
+            id=rule_id,
+            base_price=base_price,
+            price_per_km=price_per_km,
+            surge_multiplier=surge_multiplier,
+            is_active=True
+        )
+        db.add(rule)
+    else:
+        rule.base_price = base_price
+        rule.price_per_km = price_per_km
+        rule.surge_multiplier = surge_multiplier
     
     await db.commit()
     

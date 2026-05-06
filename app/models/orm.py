@@ -9,6 +9,7 @@ class UserRole(str, enum.Enum):
     COURIER = "courier"
     ADMIN = "admin"
     DISPATCHER = "dispatcher"
+    SUPPLIER = "supplier"
 
 class OrderStatus(str, enum.Enum):
     CREATED = "created"
@@ -35,10 +36,13 @@ class User(Base):
     role = Column(String, default=UserRole.CUSTOMER)
     is_active = Column(Boolean, default=True)
     is_verified = Column(Boolean, default=False)
+    supplier_code = Column(String, unique=True, index=True, nullable=True)
+    company_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     courier_profile = relationship("Courier", back_populates="user", uselist=False)
-    orders = relationship("Order", back_populates="customer")
+    orders = relationship("Order", foreign_keys="[Order.customer_id]", back_populates="customer")
+    supplied_orders = relationship("Order", foreign_keys="[Order.supplier_id]", back_populates="supplier")
     ratings_given = relationship("Rating", back_populates="reviewer")
     notifications = relationship("Notification", back_populates="user")
 
@@ -67,6 +71,10 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     customer_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     courier_id = Column(Integer, ForeignKey("couriers.id"), nullable=True)
+    supplier_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    tracking_code = Column(String, unique=True, index=True, nullable=True) # E.g. LOOP-8F9A2B
+    customer_note = Column(Text, nullable=True) # E.g. "Lütfen kapıya bırakın"
     
     status = Column(String, default=OrderStatus.CREATED)
     
@@ -86,7 +94,8 @@ class Order(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
-    customer = relationship("User", back_populates="orders")
+    customer = relationship("User", foreign_keys=[customer_id], back_populates="orders")
+    supplier = relationship("User", foreign_keys=[supplier_id], back_populates="supplied_orders")
     courier = relationship("Courier", back_populates="assigned_orders")
     payment = relationship("PaymentTransaction", back_populates="order", uselist=False)
     rating = relationship("Rating", back_populates="order", uselist=False)

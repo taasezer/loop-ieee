@@ -14,9 +14,15 @@ from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+from sqlalchemy import text
+
 async def seed_data():
     """Seed database with test data"""
     async with AsyncSessionLocal() as db:
+        print("🧹 Clearing existing data...")
+        await db.execute(text("TRUNCATE TABLE notifications, orders, couriers, promotion_codes, pricing_rules, users CASCADE;"))
+        await db.commit()
+        
         print("🌱 Seeding database with test data...")
         
         # 1. Create test users
@@ -51,6 +57,18 @@ async def seed_data():
         )
         db.add(customer2)
         
+        # Supplier users
+        supplier1 = User(
+            email="tedarikci@loop.com",
+            phone_number="+905551234572",
+            full_name="Tedarikçi Test",
+            hashed_password=pwd_context.hash("admin123"),
+            role=UserRole.SUPPLIER,
+            company_name="Test Tedarikçi A.Ş.",
+            supplier_code="SUP-TEST01"
+        )
+        db.add(supplier1)
+        
         # Courier users
         courier_user1 = User(
             email="courier1@loop.com",
@@ -74,10 +92,11 @@ async def seed_data():
         await db.refresh(admin)
         await db.refresh(customer1)
         await db.refresh(customer2)
+        await db.refresh(supplier1)
         await db.refresh(courier_user1)
         await db.refresh(courier_user2)
         
-        print(f"✅ Created 5 users (1 admin, 2 customers, 2 couriers)")
+        print(f"✅ Created 6 users (1 admin, 2 customers, 1 supplier, 2 couriers)")
         
         # 2. Create courier profiles
         print("\n🚗 Creating courier profiles...")
@@ -156,60 +175,66 @@ async def seed_data():
         
         print(f"✅ Created 2 promotion codes (WELCOME20, SAVE10)")
         
-        # 5. Create test orders
+        # 5. Create test orders with varied statuses
         print("\n📦 Creating orders...")
         
-        order1 = Order(
-            customer_id=customer1.id,
-            courier_id=courier1.id,
-            pickup_address="Taksim Meydanı, Beyoğlu, İstanbul",
-            pickup_latitude=41.0369,
-            pickup_longitude=28.9850,
-            delivery_address="Beşiktaş Meydanı, İstanbul",
-            delivery_latitude=41.0422,
-            delivery_longitude=29.0079,
-            distance_km=3.2,
-            price=26.20,
-            status=OrderStatus.IN_TRANSIT
-        )
-        db.add(order1)
+        # Delivered orders (35 total)
+        for i in range(35):
+            order = Order(
+                customer_id=customer1.id if i % 2 == 0 else customer2.id,
+                courier_id=courier1.id if i % 2 == 0 else courier2.id,
+                pickup_address=f"Pickup Location {i+1}, Istanbul",
+                pickup_latitude=41.0 + (i * 0.001),
+                pickup_longitude=29.0 + (i * 0.001),
+                delivery_address=f"Delivery Location {i+1}, Istanbul",
+                delivery_latitude=41.0 + (i * 0.002),
+                delivery_longitude=29.0 + (i * 0.002),
+                distance_km=3.0 + (i % 10),
+                price=20.0 + (i % 20),
+                status=OrderStatus.DELIVERED,
+                completed_at=datetime.utcnow() - timedelta(hours=(i % 24)),
+                tracking_code=f"LOOP-TEST-D{i}"
+            )
+            db.add(order)
         
-        order2 = Order(
-            customer_id=customer2.id,
-            courier_id=courier2.id,
-            pickup_address="Kadıköy İskele, İstanbul",
-            pickup_latitude=40.9907,
-            pickup_longitude=29.0258,
-            delivery_address="Bağdat Caddesi, Kadıköy, İstanbul",
-            delivery_latitude=40.9772,
-            delivery_longitude=29.0613,
-            distance_km=5.8,
-            price=35.30,
-            status=OrderStatus.DELIVERED,
-            completed_at=datetime.utcnow() - timedelta(hours=2)
-        )
-        db.add(order2)
+        # In-progress orders (8 total)
+        for i in range(8):
+            order = Order(
+                customer_id=customer1.id if i % 2 == 0 else customer2.id,
+                courier_id=courier1.id if i % 2 == 0 else courier2.id,
+                pickup_address=f"In Progress Pickup {i+1}, Istanbul",
+                pickup_latitude=41.0 + (i * 0.001),
+                pickup_longitude=29.0 + (i * 0.001),
+                delivery_address=f"In Progress Delivery {i+1}, Istanbul",
+                delivery_latitude=41.0 + (i * 0.002),
+                delivery_longitude=29.0 + (i * 0.002),
+                distance_km=4.0 + (i % 8),
+                price=25.0 + (i % 15),
+                status=OrderStatus.IN_TRANSIT,
+                tracking_code=f"LOOP-TEST-T{i}"
+            )
+            db.add(order)
         
-        order3 = Order(
-            customer_id=customer1.id,
-            pickup_address="Şişli Merkez, İstanbul",
-            pickup_latitude=41.0602,
-            pickup_longitude=28.9875,
-            delivery_address="Mecidiyeköy, İstanbul",
-            delivery_latitude=41.0688,
-            delivery_longitude=28.9963,
-            distance_km=2.1,
-            price=22.35,
-            status=OrderStatus.CREATED
-        )
-        db.add(order3)
+        # Cancelled orders (4 total)
+        for i in range(4):
+            order = Order(
+                customer_id=customer1.id if i % 2 == 0 else customer2.id,
+                pickup_address=f"Cancelled Pickup {i+1}, Istanbul",
+                pickup_latitude=41.0 + (i * 0.001),
+                pickup_longitude=29.0 + (i * 0.001),
+                delivery_address=f"Cancelled Delivery {i+1}, Istanbul",
+                delivery_latitude=41.0 + (i * 0.002),
+                delivery_longitude=29.0 + (i * 0.002),
+                distance_km=2.0 + i,
+                price=18.0 + (i * 2),
+                status=OrderStatus.CANCELLED,
+                tracking_code=f"LOOP-TEST-C{i}"
+            )
+            db.add(order)
         
         await db.commit()
-        await db.refresh(order1)
-        await db.refresh(order2)
-        await db.refresh(order3)
         
-        print(f"✅ Created 3 orders (1 in-transit, 1 delivered, 1 created)")
+        print(f"✅ Created 47 orders (35 delivered, 8 in-progress, 4 cancelled)")
         
         # 6. Create notifications
         print("\n🔔 Creating notifications...")
@@ -217,7 +242,7 @@ async def seed_data():
         notif1 = Notification(
             user_id=customer1.id,
             title="Order Confirmed",
-            body=f"Your order #{order1.id} has been confirmed!",
+            body=f"Your order has been confirmed!",
             is_read=True
         )
         db.add(notif1)
@@ -225,7 +250,7 @@ async def seed_data():
         notif2 = Notification(
             user_id=customer1.id,
             title="Courier Assigned",
-            body=f"A courier has been assigned to order #{order1.id}",
+            body=f"A courier has been assigned to your order",
             is_read=False
         )
         db.add(notif2)
@@ -233,7 +258,7 @@ async def seed_data():
         notif3 = Notification(
             user_id=courier_user1.id,
             title="New Order",
-            body=f"You have been assigned order #{order1.id}",
+            body=f"You have been assigned a new order",
             is_read=False
         )
         db.add(notif3)

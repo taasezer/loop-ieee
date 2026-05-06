@@ -2,6 +2,7 @@ from typing import Dict, Optional, List
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from app.models.orm import Order, OrderStatus, Courier
 from app.services.notifications import notification_service
 
@@ -183,7 +184,7 @@ class OrderWorkflowService:
         courier_id: Optional[int] = None
     ) -> List[Order]:
         """Get active (non-terminal) orders"""
-        query = select(Order).where(
+        query = select(Order).options(selectinload(Order.supplier)).where(
             Order.status.not_in([OrderStatus.DELIVERED, OrderStatus.CANCELLED])
         )
         
