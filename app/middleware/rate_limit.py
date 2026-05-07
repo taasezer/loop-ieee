@@ -6,10 +6,28 @@ from typing import Callable
 import redis.asyncio as redis
 from app.config import settings
 
-# Initialize limiter with Redis backend
+import socket
+
+def is_redis_available(url: str) -> bool:
+    """Check if Redis is reachable to gracefully fallback to memory storage"""
+    try:
+        # Example url: redis://localhost:6379/0
+        parts = url.replace("redis://", "").split("/")
+        host_port = parts[0].split(":")
+        host = host_port[0]
+        port = int(host_port[1]) if len(host_port) > 1 else 6379
+        s = socket.create_connection((host, port), timeout=0.5)
+        s.close()
+        return True
+    except Exception:
+        return False
+
+# Use Redis if available, otherwise gracefully fallback to memory
+_storage_uri = settings.REDIS_URL if is_redis_available(settings.REDIS_URL) else "memory://"
+
 limiter = Limiter(
     key_func=get_remote_address,
-    storage_uri=settings.REDIS_URL,
+    storage_uri=_storage_uri,
     default_limits=["200/hour"]
 )
 
