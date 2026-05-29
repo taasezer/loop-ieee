@@ -43,6 +43,7 @@ class CourierStatsResponse(BaseModel):
     rating: float
     total_deliveries: int
     active_orders: int
+    supplier_name: Optional[str] = None
     
     class Config:
         from_attributes = True
@@ -96,7 +97,7 @@ async def get_all_couriers(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all couriers with statistics (admin only)"""
-    query = select(Courier)
+    query = select(Courier).options(selectinload(Courier.supplier))
     
     if is_online is not None:
         query = query.where(Courier.is_online == is_online)
@@ -136,7 +137,8 @@ async def get_all_couriers(
                 is_online=courier.is_online,
                 rating=courier.rating,
                 total_deliveries=total_deliveries,
-                active_orders=active_orders
+                active_orders=active_orders,
+                supplier_name=courier.supplier.company_name if courier.supplier else None
             )
         )
     

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy import and_
 from typing import List
 from app.database import get_db
@@ -20,6 +21,18 @@ class CourierResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class MyCourierResponse(BaseModel):
+    id: int
+    courier_name: str
+    vehicle_type: str
+    is_online: bool
+    rating: float
+    current_latitude: float | None = None
+    current_longitude: float | None = None
+    
+    class Config:
+        from_attributes = True
+
 @router.get("/", response_model=List[CourierResponse])
 async def get_couriers(
     db: AsyncSession = Depends(get_db)
@@ -34,6 +47,34 @@ async def get_couriers(
             is_online=c.is_online,
             rating=c.rating,
             created_at=str(c.user.created_at) if hasattr(c, 'user') and c.user else "N/A"
+        ) for c in couriers
+    ]
+
+@router.get("/my-couriers", response_model=List[MyCourierResponse])
+async def get_my_couriers(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get couriers belonging to the current supplier"""
+    if current_user.role != UserRole.SUPPLIER:
+        raise HTTPException(status_code=403, detail="Only suppliers can view their couriers")
+        
+    result = await db.execute(
+        select(Courier)
+        .options(selectinload(Courier.user))
+        .where(Courier.supplier_id == current_user.id)
+    )
+    couriers = result.scalars().all()
+    
+    return [
+        MyCourierResponse(
+            id=c.id,
+            courier_name=c.user.full_name if c.user else "Bilinmiyor",
+            vehicle_type=c.vehicle_type,
+            is_online=c.is_online,
+            rating=c.rating,
+            current_latitude=c.current_latitude,
+            current_longitude=c.current_longitude
         ) for c in couriers
     ]
 

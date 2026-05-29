@@ -4,7 +4,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from app.database import get_db
-from app.models.orm import Order, User, OrderStatus, UserRole
+from app.models.orm import Order, User, OrderStatus, UserRole, Courier, VehicleType
 from app.dependencies import get_current_user
 from app.services.pricing import calculate_order_price
 from pydantic import BaseModel
@@ -32,6 +32,8 @@ class OrderCreate(BaseModel):
     distance_km: float # In a real app, this would be calculated server-side via OSRM
     customer_note: Optional[str] = None
     supplier_code: Optional[str] = None
+    cargo_type: Optional[str] = None
+    cargo_weight: Optional[float] = None
 
 class OrderResponse(BaseModel):
     id: int
@@ -41,7 +43,10 @@ class OrderResponse(BaseModel):
     delivery_address: str
     tracking_code: Optional[str] = None
     customer_note: Optional[str] = None
+    cargo_type: Optional[str] = None
+    cargo_weight: Optional[float] = None
     supplier_company: Optional[str] = None
+    supplier_code: Optional[str] = None
     created_at: str
 
     class Config:
@@ -67,6 +72,8 @@ async def create_order(
     
     supplier_id = None
     supplier_company = None
+    assigned_supplier_code = None
+    
     if order_in.supplier_code:
         supplier_result = await db.execute(select(User).where(User.supplier_code == order_in.supplier_code.upper()))
         supplier = supplier_result.scalar_one_or_none()
@@ -74,6 +81,16 @@ async def create_order(
             raise HTTPException(status_code=404, detail="Tedarikçi kodu geçersiz.")
         supplier_id = supplier.id
         supplier_company = supplier.company_name
+        assigned_supplier_code = supplier.supplier_code
+    else:
+        # Assign random supplier
+        from sqlalchemy.sql.expression import func
+        supplier_result = await db.execute(select(User).where(User.role == UserRole.SUPPLIER).order_by(func.random()).limit(1))
+        random_supplier = supplier_result.scalar_one_or_none()
+        if random_supplier:
+            supplier_id = random_supplier.id
+            supplier_company = random_supplier.company_name
+            assigned_supplier_code = random_supplier.supplier_code
     
     new_order = Order(
         customer_id=current_user.id,
@@ -87,6 +104,8 @@ async def create_order(
         price=price,
         tracking_code=generate_tracking_code(),
         customer_note=html.escape(order_in.customer_note) if order_in.customer_note else None,
+        cargo_type=order_in.cargo_type,
+        cargo_weight=order_in.cargo_weight,
         supplier_id=supplier_id,
         status=OrderStatus.CREATED
     )
@@ -103,7 +122,10 @@ async def create_order(
         delivery_address=new_order.delivery_address,
         tracking_code=new_order.tracking_code,
         customer_note=new_order.customer_note,
+        cargo_type=new_order.cargo_type,
+        cargo_weight=new_order.cargo_weight,
         supplier_company=supplier_company,
+        supplier_code=assigned_supplier_code,
         created_at=str(new_order.created_at)
     )
 
@@ -125,6 +147,8 @@ async def get_orders(
             pickup_address=o.pickup_address,
             delivery_address=o.delivery_address,
             tracking_code=o.tracking_code,
+            cargo_type=o.cargo_type,
+            cargo_weight=o.cargo_weight,
             supplier_company=o.supplier.company_name if o.supplier else None,
             created_at=str(o.created_at)
         ) for o in orders
@@ -157,6 +181,8 @@ async def get_active_orders(
             pickup_address=o.pickup_address,
             delivery_address=o.delivery_address,
             tracking_code=o.tracking_code,
+            cargo_type=o.cargo_type,
+            cargo_weight=o.cargo_weight,
             supplier_company=o.supplier.company_name if o.supplier else None,
             created_at=str(o.created_at)
         ) for o in orders
@@ -185,6 +211,8 @@ async def get_order(
         delivery_address=order.delivery_address,
         tracking_code=order.tracking_code,
         customer_note=order.customer_note,
+        cargo_type=order.cargo_type,
+        cargo_weight=order.cargo_weight,
         created_at=str(order.created_at)
     )
 
@@ -261,10 +289,17 @@ async def update_order_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Update order status (admin only)"""
-    if current_user.role not in [UserRole.ADMIN, UserRole.DISPATCHER]:
+    """Update order status (admin/dispatcher or supplier for own orders)"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.DISPATCHER, UserRole.SUPPLIER]:
         raise HTTPException(status_code=403, detail="Not authorized")
         
+    # If supplier, verify ownership
+    if current_user.role == UserRole.SUPPLIER:
+        check_result = await db.execute(select(Order).where(Order.id == order_id))
+        check_order = check_result.scalar_one_or_none()
+        if not check_order or check_order.supplier_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this order")
+            
     result = await order_workflow_service.update_order_status(
         db=db,
         order_id=order_id,
@@ -276,3 +311,111 @@ async def update_order_status(
         raise HTTPException(status_code=400, detail=result["error"])
     
     return {"message": "Status updated successfully", **result}
+
+import math
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Calculate the great circle distance in kilometers between two points on the earth."""
+    if lat1 is None or lon1 is None or lat2 is None or lon2 is None:
+        return float('inf')
+    R = 6371.0 # Earth radius in kilometers
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+class CourierRecommendation(BaseModel):
+    courier_id: int
+    courier_name: str
+    vehicle_type: str
+    distance_km: float
+    rating: float
+
+class AssignCourierRequest(BaseModel):
+    courier_id: int
+
+@router.get("/{order_id}/recommend-couriers", response_model=List[CourierRecommendation])
+async def recommend_couriers(
+    order_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Suggest couriers based on distance and cargo weight constraints."""
+    if current_user.role not in [UserRole.SUPPLIER, UserRole.ADMIN, UserRole.DISPATCHER]:
+        raise HTTPException(status_code=403, detail="Not authorized to recommend couriers")
+        
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if order.status != OrderStatus.CREATED:
+        raise HTTPException(status_code=400, detail="Only CREATED orders can be assigned")
+        
+    # Get active/online couriers
+    query = select(Courier).options(selectinload(Courier.user)).where(Courier.is_online == True)
+    
+    # If supplier, only recommend their own couriers
+    if current_user.role == UserRole.SUPPLIER:
+        query = query.where(Courier.supplier_id == current_user.id)
+        
+    couriers_result = await db.execute(query)
+    couriers = couriers_result.scalars().all()
+    
+    recommendations = []
+    weight = order.cargo_weight or 0.0
+    
+    for courier in couriers:
+        # Weight Constraint Logic: If > 10kg, only CAR or VAN
+        if weight > 10.0 and courier.vehicle_type not in [VehicleType.CAR, VehicleType.VAN]:
+            continue
+            
+        dist = haversine(order.pickup_latitude, order.pickup_longitude, courier.current_latitude, courier.current_longitude)
+        
+        recommendations.append(CourierRecommendation(
+            courier_id=courier.id,
+            courier_name=courier.user.full_name if courier.user else "Bilinmeyen",
+            vehicle_type=courier.vehicle_type,
+            distance_km=round(dist, 2),
+            rating=courier.rating or 5.0
+        ))
+        
+    # Sort by distance
+    recommendations.sort(key=lambda x: x.distance_km)
+    
+    # Return top 5
+    return recommendations[:5]
+
+@router.post("/{order_id}/assign-courier")
+async def assign_courier(
+    order_id: int,
+    request: AssignCourierRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Assign a specific courier to an order (Supplier Action)"""
+    if current_user.role not in [UserRole.SUPPLIER, UserRole.ADMIN, UserRole.DISPATCHER]:
+        raise HTTPException(status_code=403, detail="Not authorized to assign couriers")
+        
+    result = await db.execute(select(Order).where(Order.id == order_id))
+    order = result.scalar_one_or_none()
+    
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    if order.status != OrderStatus.CREATED:
+        raise HTTPException(status_code=400, detail="Order is already assigned or in progress")
+        
+    # Verify the courier exists
+    courier_result = await db.execute(select(Courier).where(Courier.id == request.courier_id))
+    courier = courier_result.scalar_one_or_none()
+    if not courier:
+        raise HTTPException(status_code=404, detail="Courier not found")
+        
+    # Perform Assignment
+    order.courier_id = courier.id
+    order.status = OrderStatus.ASSIGNED
+    await db.commit()
+    
+    return {"message": "Courier assigned successfully", "order_id": order.id, "courier_id": courier.id}

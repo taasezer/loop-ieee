@@ -17,6 +17,7 @@ class UserCreate(BaseModel):
     phone_number: str
     role: UserRole = UserRole.CUSTOMER
     company_name: str | None = None
+    supplier_code: str | None = None
 
 class UserResponse(BaseModel):
     id: int
@@ -68,6 +69,25 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+    
+    # Kurye ise otomatik profil oluştur ve tedarikçiye bağla
+    if user.role == UserRole.COURIER:
+        from app.models.orm import Courier
+        
+        target_supplier_id = None
+        if user.supplier_code:
+            supplier_result = await db.execute(select(User).where(User.supplier_code == user.supplier_code.upper()))
+            supplier = supplier_result.scalar_one_or_none()
+            if supplier:
+                target_supplier_id = supplier.id
+                
+        new_courier = Courier(
+            user_id=new_user.id,
+            supplier_id=target_supplier_id,
+            is_online=False
+        )
+        db.add(new_courier)
+        await db.commit()
     return new_user
 
 @router.post("/login", response_model=Token)

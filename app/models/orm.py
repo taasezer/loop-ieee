@@ -40,9 +40,10 @@ class User(Base):
     company_name = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    courier_profile = relationship("Courier", back_populates="user", uselist=False)
+    courier_profile = relationship("Courier", foreign_keys="[Courier.user_id]", back_populates="user", uselist=False)
     orders = relationship("Order", foreign_keys="[Order.customer_id]", back_populates="customer")
     supplied_orders = relationship("Order", foreign_keys="[Order.supplier_id]", back_populates="supplier")
+    supplied_couriers = relationship("Courier", foreign_keys="[Courier.supplier_id]", back_populates="supplier")
     ratings_given = relationship("Rating", back_populates="reviewer")
     notifications = relationship("Notification", back_populates="user")
 
@@ -58,8 +59,10 @@ class Courier(Base):
     current_longitude = Column(Float, nullable=True)
     last_location_update = Column(DateTime(timezone=True), nullable=True)
     rating = Column(Float, default=5.0)
+    supplier_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     
-    user = relationship("User", back_populates="courier_profile")
+    user = relationship("User", foreign_keys=[user_id], back_populates="courier_profile")
+    supplier = relationship("User", foreign_keys=[supplier_id], back_populates="supplied_couriers")
     assigned_orders = relationship("Order", back_populates="courier")
     earnings = relationship("Earning", back_populates="courier")
     ratings_received = relationship("Rating", back_populates="courier")
@@ -75,6 +78,8 @@ class Order(Base):
     
     tracking_code = Column(String, unique=True, index=True, nullable=True) # E.g. LOOP-8F9A2B
     customer_note = Column(Text, nullable=True) # E.g. "Lütfen kapıya bırakın"
+    cargo_type = Column(String, nullable=True) # E.g. "Kutu", "Zarf"
+    cargo_weight = Column(Float, nullable=True) # In kg
     
     status = Column(String, default=OrderStatus.CREATED)
     

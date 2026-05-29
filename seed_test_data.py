@@ -18,11 +18,15 @@ from sqlalchemy import text
 
 async def seed_data():
     """Seed database with test data"""
-    async with AsyncSessionLocal() as db:
-        print("🧹 Clearing existing data...")
-        await db.execute(text("TRUNCATE TABLE notifications, orders, couriers, promotion_codes, pricing_rules, users CASCADE;"))
-        await db.commit()
+    from app.database import engine, Base
+    
+    # Tüm tabloları sıfırla ve baştan oluştur (Şema güncellemeleri için en garantisi)
+    print("🔧 Dropping and recreating all database tables...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
         
+    async with AsyncSessionLocal() as db:
         print("🌱 Seeding database with test data...")
         
         # 1. Create test users
@@ -108,7 +112,8 @@ async def seed_data():
             is_online=True,
             rating=4.8,
             current_latitude=41.0082,
-            current_longitude=28.9784  # Istanbul
+            current_longitude=28.9784,  # Istanbul
+            supplier_id=supplier1.id
         )
         db.add(courier1)
         
@@ -119,7 +124,8 @@ async def seed_data():
             is_online=True,
             rating=4.6,
             current_latitude=41.0150,
-            current_longitude=28.9850
+            current_longitude=28.9850,
+            supplier_id=supplier1.id
         )
         db.add(courier2)
         
@@ -193,7 +199,9 @@ async def seed_data():
                 price=20.0 + (i % 20),
                 status=OrderStatus.DELIVERED,
                 completed_at=datetime.utcnow() - timedelta(hours=(i % 24)),
-                tracking_code=f"LOOP-TEST-D{i}"
+                tracking_code=f"LOOP-TEST-D{i}",
+                cargo_type="Kutu",
+                cargo_weight=2.0 + (i % 5)
             )
             db.add(order)
         
@@ -211,7 +219,9 @@ async def seed_data():
                 distance_km=4.0 + (i % 8),
                 price=25.0 + (i % 15),
                 status=OrderStatus.IN_TRANSIT,
-                tracking_code=f"LOOP-TEST-T{i}"
+                tracking_code=f"LOOP-TEST-T{i}",
+                cargo_type="Zarf" if i % 2 == 0 else "Kutu",
+                cargo_weight=0.5 if i % 2 == 0 else 5.5
             )
             db.add(order)
         
@@ -228,7 +238,29 @@ async def seed_data():
                 distance_km=2.0 + i,
                 price=18.0 + (i * 2),
                 status=OrderStatus.CANCELLED,
-                tracking_code=f"LOOP-TEST-C{i}"
+                tracking_code=f"LOOP-TEST-C{i}",
+                cargo_type="Koli",
+                cargo_weight=15.0
+            )
+            db.add(order)
+        
+        # Supplier 'CREATED' orders for courier assignment testing (3 total)
+        for i in range(3):
+            order = Order(
+                customer_id=customer1.id,
+                supplier_id=supplier1.id,
+                pickup_address=f"Tedarikçi Deposu {i+1}, Istanbul",
+                pickup_latitude=41.0100 + (i * 0.005),
+                pickup_longitude=28.9800 + (i * 0.005),
+                delivery_address=f"Müşteri Adresi {i+1}, Istanbul",
+                delivery_latitude=41.0200 + (i * 0.010),
+                delivery_longitude=28.9900 + (i * 0.010),
+                distance_km=5.0 + i,
+                price=30.0 + (i * 5),
+                status=OrderStatus.CREATED,
+                tracking_code=f"LOOP-TEST-S{i}",
+                cargo_type="Koli" if i == 0 else "Kutu",
+                cargo_weight=15.0 if i == 0 else 3.5  # First is heavy (forces Car/Van), others light
             )
             db.add(order)
         
@@ -274,6 +306,7 @@ async def seed_data():
         print("  Admin:     admin@loop.com / admin123")
         print("  Customer1: customer1@test.com / test123")
         print("  Customer2: customer2@test.com / test123")
+        print("  Supplier:  tedarikci@loop.com / admin123")
         print("  Courier1:  courier1@loop.com / courier123")
         print("  Courier2:  courier2@loop.com / courier123")
         print("\n🎁 Promotion Codes:")

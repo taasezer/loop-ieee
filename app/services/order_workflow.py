@@ -5,6 +5,7 @@ from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from app.models.orm import Order, OrderStatus, Courier
 from app.services.notifications import notification_service
+from app.services.n8n_service import n8n_service
 
 class OrderWorkflowService:
     """Service for managing order state transitions and workflow"""
@@ -87,6 +88,13 @@ class OrderWorkflowService:
                     title=f"Order #{order.id} Status Update",
                     body=f"Order status changed from {old_status} to {new_status}"
                 )
+        
+        # N8N Automation Trigger
+        await n8n_service.trigger_order_status_update(
+            order_id=order.id, 
+            new_status=new_status,
+            supplier_id=order.supplier_id
+        )
         
         return {
             "success": True,
