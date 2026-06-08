@@ -52,6 +52,7 @@ class Courier(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    courier_code = Column(String, unique=True, index=True, nullable=True)
     vehicle_type = Column(String, default=VehicleType.MOTORCYCLE)
     vehicle_plate = Column(String, nullable=True)
     is_online = Column(Boolean, default=False)

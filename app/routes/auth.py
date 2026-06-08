@@ -80,10 +80,18 @@ async def register(user: UserCreate, db: AsyncSession = Depends(get_db)):
             supplier = supplier_result.scalar_one_or_none()
             if supplier:
                 target_supplier_id = supplier.id
+            else:
+                # Tedarikçi kodu geçersizse hata fırlat
+                raise HTTPException(status_code=400, detail="Geçersiz tedarikçi kodu.")
+        
+        # Kurye kodu üret
+        chars = string.ascii_uppercase + string.digits
+        generated_courier_code = "COUR-" + "".join(secrets.choice(chars) for _ in range(6))
                 
         new_courier = Courier(
             user_id=new_user.id,
             supplier_id=target_supplier_id,
+            courier_code=generated_courier_code,
             is_online=False
         )
         db.add(new_courier)
