@@ -47,8 +47,6 @@ async def create_promotion_code(
 ):
     """Create new promotion code (admin only)"""
     
-    # Add PromotionCode model to ORM first
-    # For now, return mock response
     from app.models.orm import PromotionCode
     
     # Check if code already exists

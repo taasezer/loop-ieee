@@ -144,6 +144,11 @@ async def get_courier_performance(
     
     if not courier:
         raise HTTPException(status_code=404, detail="Courier profile not found")
+        
+    # Get total assigned orders for success rate
+    all_orders_result = await db.execute(select(Order).where(Order.courier_id == courier.id))
+    all_orders = all_orders_result.scalars().all()
+    total_orders = len(all_orders)
     
     # Get completed orders
     orders_result = await db.execute(
@@ -163,9 +168,20 @@ async def get_courier_performance(
     
     avg_rating = sum(r.score for r in ratings) / len(ratings) if ratings else 0.0
     
+    # Calculate success rate
+    success_rate = (len(completed_orders) / total_orders * 100) if total_orders > 0 else 100.0
+    
+    # Calculate membership duration
+    from datetime import datetime
+    created_at = current_user.created_at or datetime.utcnow()
+    delta = datetime.utcnow() - created_at
+    membership_months = max(1, int(delta.days / 30))
+    
     return {
         "completed_deliveries": len(completed_orders),
         "current_rating": courier.rating,
         "average_rating": avg_rating,
-        "total_ratings": len(ratings)
+        "total_ratings": len(ratings),
+        "success_rate": round(success_rate, 1),
+        "membership_months": membership_months
     }
